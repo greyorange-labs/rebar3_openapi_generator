@@ -1,0 +1,17 @@
+{application, rebar3_openapi_generator, [
+    {description, "Rebar3 plugin to generate OpenAPI specs from Erlang/Cowboy handlers"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib,
+        jsx,
+        yamerl,
+        cowboy,
+        trails
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Proprietary"]},
+    {links, []}
+]}.
