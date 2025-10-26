@@ -21,7 +21,7 @@ init(State) ->
         {name, ?PROVIDER},
         {module, ?MODULE},
         {namespace, ?NAMESPACE},
-        {bare, true},
+        {bare, false},
         {deps, ?DEPS},
         {example, "rebar3 openapi generate --app put"},
         {short_desc, "Generate OpenAPI specs from Cowboy handlers"},
@@ -90,9 +90,12 @@ execute_generation(State, AppName, Args) ->
 
                 Content =
                     case Format of
-                        "yaml" -> yamerl:encode(Spec);
-                        "json" -> jsx:prettify(jsx:encode(Spec));
-                        _ -> jsx:prettify(jsx:encode(Spec))
+                        "yaml" ->
+                            yaml_encoder:encode(Spec);
+                        "json" ->
+                            jsx:prettify(jsx:encode(Spec));
+                        _ ->
+                            jsx:prettify(jsx:encode(Spec))
                     end,
 
                 ok = file:write_file(OutputFile, Content),
@@ -136,9 +139,15 @@ discover_handlers(State, AppName) ->
     AllDeps = rebar_state:all_deps(State),
     Apps = ProjectApps ++ AllDeps,
 
-    % Find the target app
-    case find_app_info(Apps, AppName) of
+    % Debug: print found apps
+    rebar_api:info("Project Apps: ~p", [[rebar_app_info:name(A) || A <- ProjectApps]]),
+    rebar_api:info("All Deps: ~p", [[rebar_app_info:name(A) || A <- AllDeps]]),
+    rebar_api:info("Looking for app: ~p (as binary: ~p)", [AppName, rebar_utils:to_binary(AppName)]),
+
+    % Find the target app using standard rebar3 pattern
+    case rebar_app_utils:find(rebar_utils:to_binary(AppName), Apps) of
         {ok, AppInfo} ->
+            rebar_api:info("Found app: ~p", [rebar_app_info:name(AppInfo)]),
             EbinDir = rebar_app_info:ebin_dir(AppInfo),
 
             case filelib:is_dir(EbinDir) of
@@ -174,22 +183,11 @@ discover_handlers(State, AppName) ->
                     end
             end;
         error ->
-            rebar_api:error("App ~p not found in project", [AppName]),
+            rebar_api:error(
+                "App ~p not found in project. Available apps: ~p",
+                [AppName, [rebar_app_info:name(A) || A <- Apps]]
+            ),
             []
-    end.
-
--doc """
--------------------------------------------------------------------------------------------
-Finds app info for a given app name in the project apps list.
--------------------------------------------------------------------------------------------
-""".
--spec find_app_info([rebar_app_info:t()], atom()) -> {ok, rebar_app_info:t()} | error.
-find_app_info([], _AppName) ->
-    error;
-find_app_info([AppInfo | Rest], AppName) ->
-    case rebar_app_info:name(AppInfo) of
-        AppName -> {ok, AppInfo};
-        _ -> find_app_info(Rest, AppName)
     end.
 
 -doc """

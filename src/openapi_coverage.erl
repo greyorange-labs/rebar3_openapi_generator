@@ -183,35 +183,35 @@ format_report(Report) ->
 
     CoverageIcon =
         if
-            Coverage >= 80.0 -> <<"✅">>;
-            Coverage >= 50.0 -> <<"⚠️ ">>;
-            true -> <<"❌">>
+            Coverage >= 80.0 -> "[OK]";
+            Coverage >= 50.0 -> "[WARN]";
+            true -> "[FAIL]"
         end,
 
     Header = io_lib:format(
-        "~n~s════════════════════════════════════════════════════════════════~n",
-        [<<>>]
+        "~n================================================================~n",
+        []
     ),
     Title = io_lib:format(
         "~s OpenAPI Coverage Report: ~p~n",
         [CoverageIcon, AppName]
     ),
     Separator = io_lib:format(
-        "════════════════════════════════════════════════════════════════~n~n",
+        "================================================================~n~n",
         []
     ),
-    SummaryLine = io_lib:format("📊 ~s~n~n", [Summary]),
+    SummaryLine = io_lib:format("[*] ~s~n~n", [Summary]),
 
     HandlerLines =
         case Handlers of
             [] ->
-                [<<"No handlers found with trails/0 export.~n">>];
+                ["No handlers found with trails/0 export.~n"];
             _ ->
                 lists:map(fun format_handler_coverage/1, Handlers)
         end,
 
     Footer = io_lib:format(
-        "~n════════════════════════════════════════════════════════════════~n",
+        "~n================================================================~n",
         []
     ),
 
@@ -232,9 +232,9 @@ format_handler_coverage(HandlerCov) ->
 
     Icon =
         if
-            Coverage >= 80.0 -> <<"✅">>;
-            Coverage >= 50.0 -> <<"⚠️ ">>;
-            true -> <<"❌">>
+            Coverage >= 80.0 -> "[OK]";
+            Coverage >= 50.0 -> "[WARN]";
+            true -> "[FAIL]"
         end,
 
     ModuleLine = io_lib:format(
@@ -244,11 +244,11 @@ format_handler_coverage(HandlerCov) ->
 
     case Undocumented of
         [] ->
-            [ModuleLine, <<"  ✓ All routes documented~n~n">>];
+            [ModuleLine, "  [x] All routes documented~n~n"];
         _ ->
             UndocLines = lists:map(
                 fun(Path) ->
-                    io_lib:format("  • Missing: ~s~n", [Path])
+                    io_lib:format("  * Missing: ~s~n", [Path])
                 end,
                 Undocumented
             ),
@@ -259,7 +259,7 @@ format_handler_coverage(HandlerCov) ->
                         [];
                     _ ->
                         [
-                            <<"~n  💡 Suggestions:~n">>
+                            "~n  [!] Suggestions:~n"
                             | lists:map(
                                 fun(Suggestion) ->
                                     io_lib:format("     - ~s~n", [Suggestion])
@@ -270,7 +270,7 @@ format_handler_coverage(HandlerCov) ->
                         ]
                 end,
 
-            [ModuleLine, UndocLines, SuggestionLines, <<"\n">>]
+            [ModuleLine, UndocLines, SuggestionLines, "\n"]
     end.
 
 -doc """
