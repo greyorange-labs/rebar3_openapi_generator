@@ -13,7 +13,7 @@ Implements the main CLI interface and coordinates all plugin components.
 
 -define(PROVIDER, generate).
 -define(NAMESPACE, openapi).
--define(DEPS, [compile]).
+-define(DEPS, [{default, compile}]).
 
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
