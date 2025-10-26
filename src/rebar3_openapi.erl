@@ -131,7 +131,10 @@ Discovers handler modules in an application by scanning for trails/0 exports.
 """.
 -spec discover_handlers(rebar_state:t(), atom()) -> [module()].
 discover_handlers(State, AppName) ->
-    Apps = rebar_state:project_apps(State),
+    % Get both project apps and all deps (for umbrella projects)
+    ProjectApps = rebar_state:project_apps(State),
+    AllDeps = rebar_state:all_deps(State),
+    Apps = ProjectApps ++ AllDeps,
 
     % Find the target app
     case find_app_info(Apps, AppName) of
