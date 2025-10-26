@@ -67,10 +67,11 @@ build_spec(AppName, Handlers, Options) ->
     MergedPaths = merge_handler_specs(HandlerSpecs),
 
     IncludeSchemas = maps:get(include_schemas, Options, true),
-    AllSchemas = case IncludeSchemas of
-        true -> extract_jesse_schemas(AppName, Options);
-        false -> #{}
-    end,
+    AllSchemas =
+        case IncludeSchemas of
+            true -> extract_jesse_schemas(AppName, Options);
+            false -> #{}
+        end,
 
     #{
         <<"openapi">> => <<"3.0.3">>,
@@ -383,21 +384,25 @@ Removes Jesse-specific fields and handles minor differences.
 -spec convert_jesse_to_openapi(map()) -> map().
 convert_jesse_to_openapi(JesseSchema) ->
     % Remove Jesse/JSON Schema specific fields not used in OpenAPI
-    CleanSchema = maps:without([
-        <<"id">>,
-        <<"$schema">>,
-        <<"$id">>
-    ], JesseSchema),
+    CleanSchema = maps:without(
+        [
+            <<"id">>,
+            <<"$schema">>,
+            <<"$id">>
+        ],
+        JesseSchema
+    ),
 
     % Recursively process nested schemas
     maps:map(
         fun
             (<<"properties">>, Props) when is_map(Props) ->
                 maps:map(
-                    fun(_PropName, PropSchema) when is_map(PropSchema) ->
-                        convert_jesse_to_openapi(PropSchema);
-                       (_PropName, PropSchema) ->
-                        PropSchema
+                    fun
+                        (_PropName, PropSchema) when is_map(PropSchema) ->
+                            convert_jesse_to_openapi(PropSchema);
+                        (_PropName, PropSchema) ->
+                            PropSchema
                     end,
                     Props
                 );

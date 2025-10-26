@@ -25,7 +25,8 @@ init(State) ->
         {deps, ?DEPS},
         {example, "rebar3 openapi generate --app put"},
         {short_desc, "Generate OpenAPI specs from Cowboy handlers"},
-        {desc, "Scans Cowboy handler modules in an application and generates OpenAPI 3.x specifications with coverage reporting."},
+        {desc,
+            "Scans Cowboy handler modules in an application and generates OpenAPI 3.x specifications with coverage reporting."},
         {opts, [
             {app, $a, "app", atom, "Target application name (required)"},
             {output, $o, "output", string, "Output directory (default: ./docs/openapi/)"},
@@ -87,11 +88,12 @@ execute_generation(State, AppName, Args) ->
                 OutputFile = filename:join(OutputDir, atom_to_list(AppName) ++ "." ++ Format),
                 ok = filelib:ensure_dir(OutputFile),
 
-                Content = case Format of
-                    "yaml" -> yamerl:encode(Spec);
-                    "json" -> jsx:prettify(jsx:encode(Spec));
-                    _ -> jsx:prettify(jsx:encode(Spec))
-                end,
+                Content =
+                    case Format of
+                        "yaml" -> yamerl:encode(Spec);
+                        "json" -> jsx:prettify(jsx:encode(Spec));
+                        _ -> jsx:prettify(jsx:encode(Spec))
+                    end,
 
                 ok = file:write_file(OutputFile, Content),
                 rebar_api:info("✓ Generated: ~s", [OutputFile]),

@@ -63,7 +63,7 @@ generate_report(AppName, Handlers) ->
 
     TotalRoutes = lists:sum([
         length(maps:get(documented_routes, HC, [])) +
-        length(maps:get(undocumented_routes, HC, []))
+            length(maps:get(undocumented_routes, HC, []))
      || HC <- HandlerCoverages
     ]),
 
@@ -72,10 +72,11 @@ generate_report(AppName, Handlers) ->
      || HC <- HandlerCoverages
     ]),
 
-    OverallCoverage = case TotalRoutes of
-        0 -> 0.0;
-        _ -> (TotalDocumented / TotalRoutes) * 100
-    end,
+    OverallCoverage =
+        case TotalRoutes of
+            0 -> 0.0;
+            _ -> (TotalDocumented / TotalRoutes) * 100
+        end,
 
     #{
         app_name => AppName,
@@ -161,10 +162,12 @@ Formats coverage summary as human-readable text.
 """.
 -spec format_summary(float(), integer(), integer()) -> binary().
 format_summary(Coverage, Documented, Total) ->
-    iolist_to_binary(io_lib:format(
-        "Coverage: ~.1f% (~p/~p routes documented)",
-        [Coverage, Documented, Total]
-    )).
+    iolist_to_binary(
+        io_lib:format(
+            "Coverage: ~.1f% (~p/~p routes documented)",
+            [Coverage, Documented, Total]
+        )
+    ).
 
 -doc """
 -------------------------------------------------------------------------------------------
@@ -178,11 +181,12 @@ format_report(Report) ->
     Handlers = maps:get(handlers, Report),
     Coverage = maps:get(total_coverage, Report),
 
-    CoverageIcon = if
-        Coverage >= 80.0 -> <<"✅">>;
-        Coverage >= 50.0 -> <<"⚠️ ">>;
-        true -> <<"❌">>
-    end,
+    CoverageIcon =
+        if
+            Coverage >= 80.0 -> <<"✅">>;
+            Coverage >= 50.0 -> <<"⚠️ ">>;
+            true -> <<"❌">>
+        end,
 
     Header = io_lib:format(
         "~n~s════════════════════════════════════════════════════════════════~n",
@@ -198,12 +202,13 @@ format_report(Report) ->
     ),
     SummaryLine = io_lib:format("📊 ~s~n~n", [Summary]),
 
-    HandlerLines = case Handlers of
-        [] ->
-            [<<"No handlers found with trails/0 export.~n">>];
-        _ ->
-            lists:map(fun format_handler_coverage/1, Handlers)
-    end,
+    HandlerLines =
+        case Handlers of
+            [] ->
+                [<<"No handlers found with trails/0 export.~n">>];
+            _ ->
+                lists:map(fun format_handler_coverage/1, Handlers)
+        end,
 
     Footer = io_lib:format(
         "~n════════════════════════════════════════════════════════════════~n",
@@ -225,11 +230,12 @@ format_handler_coverage(HandlerCov) ->
     Undocumented = maps:get(undocumented_routes, HandlerCov),
     Suggestions = maps:get(suggestions, HandlerCov, []),
 
-    Icon = if
-        Coverage >= 80.0 -> <<"✅">>;
-        Coverage >= 50.0 -> <<"⚠️ ">>;
-        true -> <<"❌">>
-    end,
+    Icon =
+        if
+            Coverage >= 80.0 -> <<"✅">>;
+            Coverage >= 50.0 -> <<"⚠️ ">>;
+            true -> <<"❌">>
+        end,
 
     ModuleLine = io_lib:format(
         "~s ~p (~.1f% documented)~n",
@@ -247,19 +253,22 @@ format_handler_coverage(HandlerCov) ->
                 Undocumented
             ),
 
-            SuggestionLines = case Suggestions of
-                [] -> [];
-                _ ->
-                    [
-                        <<"~n  💡 Suggestions:~n">> |
-                        lists:map(
-                            fun(Suggestion) ->
-                                io_lib:format("     - ~s~n", [Suggestion])
-                            end,
-                            lists:sublist(Suggestions, 3)  % Show max 3 suggestions
-                        )
-                    ]
-            end,
+            SuggestionLines =
+                case Suggestions of
+                    [] ->
+                        [];
+                    _ ->
+                        [
+                            <<"~n  💡 Suggestions:~n">>
+                            | lists:map(
+                                fun(Suggestion) ->
+                                    io_lib:format("     - ~s~n", [Suggestion])
+                                end,
+                                % Show max 3 suggestions
+                                lists:sublist(Suggestions, 3)
+                            )
+                        ]
+                end,
 
             [ModuleLine, UndocLines, SuggestionLines, <<"\n">>]
     end.
@@ -282,8 +291,10 @@ format_suggestions(Report) ->
             lists:map(
                 fun(Suggestion) ->
                     iolist_to_binary([
-                        <<"- [ ] ">>, atom_to_binary(Module, utf8),
-                        <<": ">>, Suggestion
+                        <<"- [ ] ">>,
+                        atom_to_binary(Module, utf8),
+                        <<": ">>,
+                        Suggestion
                     ])
                 end,
                 Suggestions

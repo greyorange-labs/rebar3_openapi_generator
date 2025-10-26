@@ -92,8 +92,7 @@ check_info_section(Spec) ->
             ),
             case MissingFields of
                 [] -> ok;
-                _ ->
-                    {error, <<"Missing required info fields: title or version">>}
+                _ -> {error, <<"Missing required info fields: title or version">>}
             end;
         _ ->
             {error, <<"info section must be an object">>}

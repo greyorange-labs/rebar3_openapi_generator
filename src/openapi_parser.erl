@@ -17,9 +17,12 @@ This module supports:
 -export([
     parse_handler/1,
     extract_routes/1,
-    extract_metadata/1,
+    extract_metadata/2,
     get_coverage_info/1,
-    normalize_path/1
+    normalize_path/1,
+    % For testing
+    has_cowboy_swagger_metadata/1,
+    extract_methods_from_trail/1
 ]).
 
 -type handler_info() :: #{
@@ -34,7 +37,8 @@ This module supports:
     methods := [binary()],
     has_metadata := boolean(),
     handler_function := atom() | undefined,
-    raw_path := term()
+    raw_path := term(),
+    metadata => map()
 }.
 
 -type coverage_info() :: #{
@@ -109,20 +113,20 @@ Parses a single trail entry to extract path, methods, and metadata presence.
 Supports multiple trail formats from trails library.
 -------------------------------------------------------------------------------------------
 """.
--spec parse_single_trail(tuple()) -> route_info().
+-spec parse_single_trail(tuple() | map()) -> route_info().
 parse_single_trail(Trail) when is_tuple(Trail) ->
     case Trail of
-        {PathSpec, Handler, Opts} ->
+        {PathSpec, Handler, _Opts} ->
             % Simple format: {Path, Handler, Options}
             #{
                 path => normalize_path(PathSpec),
                 raw_path => PathSpec,
-                methods => [<<"GET">>],  % Default method
-                handler => Handler,
+                % Default method
+                methods => [<<"GET">>],
+                handler_function => Handler,
                 has_metadata => false,
                 metadata => #{}
             };
-
         _ ->
             % trails:trail format - extract using trails functions
             PathSpec = trails:path_match(Trail),
@@ -135,56 +139,89 @@ parse_single_trail(Trail) when is_tuple(Trail) ->
                 path => normalize_path(PathSpec),
                 raw_path => PathSpec,
                 methods => Methods,
-                handler => Handler,
-                has_metadata => has_openapi_metadata(TrailMetadata),
+                handler_function => Handler,
+                has_metadata => has_cowboy_swagger_metadata(TrailMetadata) orelse has_openapi_metadata(TrailMetadata),
                 metadata => TrailMetadata
             }
-    end.
+    end;
+parse_single_trail(Trail) when is_map(Trail) ->
+    % trails:trail format returns a map/record - extract using trails functions
+    PathSpec = trails:path_match(Trail),
+    Handler = trails:handler(Trail),
+    TrailMetadata = trails:metadata(Trail),
+
+    Methods = extract_methods_from_trail(TrailMetadata),
+
+    #{
+        path => normalize_path(PathSpec),
+        raw_path => PathSpec,
+        methods => Methods,
+        handler_function => Handler,
+        has_metadata => has_cowboy_swagger_metadata(TrailMetadata) orelse has_openapi_metadata(TrailMetadata),
+        metadata => TrailMetadata
+    }.
 
 -doc """
 -------------------------------------------------------------------------------------------
 Extracts HTTP methods from trail metadata.
-Checks both allowed_methods in metadata and OpenAPI paths definitions.
+Supports cowboy_swagger format where methods are direct keys in metadata.
 -------------------------------------------------------------------------------------------
 """.
 -spec extract_methods_from_trail(map()) -> [binary()].
 extract_methods_from_trail(Metadata) ->
-    case maps:get(paths, Metadata, #{}) of
-        PathsMap when map_size(PathsMap) > 0 ->
-            % Get methods from first path entry in OpenAPI metadata
-            [FirstPath | _] = maps:keys(PathsMap),
-            PathSpec = maps:get(FirstPath, PathsMap),
-            Methods = maps:keys(PathSpec),
-            [ensure_binary(M) || M <- Methods];
-        _ ->
-            % Check for allowed_methods in metadata
+    % cowboy_swagger format: methods are direct keys in metadata
+    HttpMethods = [get, post, put, delete, patch, head, options],
+    FoundMethods = [M || M <- HttpMethods, maps:is_key(M, Metadata)],
+
+    case FoundMethods of
+        [] ->
+            % Check for allowed_methods in metadata as fallback
             case maps:get(allowed_methods, Metadata, undefined) of
-                undefined -> [<<"GET">>];  % Default
+                % Default
+                undefined -> [<<"GET">>];
                 MethodsList -> [ensure_binary(M) || M <- MethodsList]
-            end
+            end;
+        Methods ->
+            [ensure_binary(M) || M <- Methods]
     end.
 
 -doc """
 -------------------------------------------------------------------------------------------
 Extracts metadata from handler module and trails.
-Combines inline trail metadata with any openapi_metadata/1 function if it exists.
+Supports cowboy_swagger format where methods are direct keys in trail metadata.
 -------------------------------------------------------------------------------------------
 """.
 -spec extract_metadata(module(), list()) -> map().
 extract_metadata(Module, Trails) ->
-    % First, collect all inline metadata from trails
+    % First, collect all inline metadata from trails (cowboy_swagger format)
     InlineMetadata = lists:foldl(
         fun(Trail, Acc) ->
             case Trail of
                 {_, _, _} ->
-                    Acc;  % Simple format, no metadata
+                    % Simple format, no metadata
+                    Acc;
                 _ ->
                     TrailMeta = trails:metadata(Trail),
-                    case maps:get(paths, TrailMeta, #{}) of
-                        PathsMap when map_size(PathsMap) > 0 ->
-                            ExistingPaths = maps:get(paths, Acc, #{}),
-                            Acc#{paths => maps:merge(ExistingPaths, PathsMap)};
-                        _ ->
+                    % In cowboy_swagger format, methods are direct keys
+                    case has_cowboy_swagger_metadata(TrailMeta) of
+                        true ->
+                            % Convert to our internal paths format for consistency
+                            PathBin = ensure_binary(trails:path_match(Trail)),
+                            NormalizedPath = normalize_path(PathBin),
+
+                            % Extract method metadata
+                            HttpMethods = [get, post, put, delete, patch, head, options],
+                            MethodsMap = maps:with(HttpMethods, TrailMeta),
+
+                            case map_size(MethodsMap) > 0 of
+                                true ->
+                                    ExistingPaths = maps:get(paths, Acc, #{}),
+                                    PathsMap = #{NormalizedPath => MethodsMap},
+                                    Acc#{paths => maps:merge(ExistingPaths, PathsMap)};
+                                false ->
+                                    Acc
+                            end;
+                        false ->
                             Acc
                     end
             end
@@ -316,8 +353,10 @@ Handles atoms (including path parameters), binaries, and strings.
 normalize_path_part(Part) when is_atom(Part) ->
     case atom_to_list(Part) of
         [$: | Rest] -> <<"{", (list_to_binary(Rest))/binary, "}">>;
-        "..." -> <<>>;  % Wildcard, replace with catch-all
-        "[...]" -> <<>>;  % Wildcard pattern
+        % Wildcard, replace with catch-all
+        "..." -> <<>>;
+        % Wildcard pattern
+        "[...]" -> <<>>;
         AtomStr -> list_to_binary(AtomStr)
     end;
 normalize_path_part(Part) when is_binary(Part) ->
@@ -349,10 +388,11 @@ calculate_coverage(Routes, Metadata) ->
         total_routes => Total,
         documented_routes => DocumentedCount,
         undocumented_paths => UndocumentedPaths,
-        coverage_percent => case Total of
-            0 -> 0.0;
-            _ -> (DocumentedCount / Total) * 100
-        end
+        coverage_percent =>
+            case Total of
+                0 -> 0.0;
+                _ -> (DocumentedCount / Total) * 100
+            end
     }.
 
 -doc """
@@ -371,13 +411,24 @@ has_metadata_for_path(Path, Metadata) ->
 
 -doc """
 -------------------------------------------------------------------------------------------
-Checks if trail metadata contains OpenAPI paths information.
+Checks if trail metadata contains OpenAPI paths information (legacy format).
 -------------------------------------------------------------------------------------------
 """.
 -spec has_openapi_metadata(map()) -> boolean().
 has_openapi_metadata(Metadata) ->
     maps:is_key(paths, Metadata) andalso
-    map_size(maps:get(paths, Metadata)) > 0.
+        map_size(maps:get(paths, Metadata)) > 0.
+
+-doc """
+-------------------------------------------------------------------------------------------
+Checks if trail metadata contains cowboy_swagger format metadata.
+In cowboy_swagger, HTTP methods are direct keys in the metadata map.
+-------------------------------------------------------------------------------------------
+""".
+-spec has_cowboy_swagger_metadata(map()) -> boolean().
+has_cowboy_swagger_metadata(Metadata) ->
+    HttpMethods = [get, post, put, delete, patch, head, options],
+    lists:any(fun(Method) -> maps:is_key(Method, Metadata) end, HttpMethods).
 
 -doc """
 -------------------------------------------------------------------------------------------
@@ -433,7 +484,9 @@ Checks if a list is a string (list of integers in valid character range).
 -------------------------------------------------------------------------------------------
 """.
 -spec is_string(list()) -> boolean().
-is_string([]) -> true;
+is_string([]) ->
+    true;
 is_string([H | T]) when is_integer(H), H >= 0, H =< 16#10FFFF ->
     is_string(T);
-is_string(_) -> false.
+is_string(_) ->
+    false.

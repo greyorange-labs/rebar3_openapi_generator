@@ -1,0 +1,13 @@
+{application, test_app, [
+    {description, "Test application for rebar3_openapi_generator with cowboy_swagger format"},
+    {vsn, "1.0.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib,
+        cowboy,
+        trails
+    ]},
+    {modules, [test_cowboy_swagger_handler]},
+    {env, []}
+]}.

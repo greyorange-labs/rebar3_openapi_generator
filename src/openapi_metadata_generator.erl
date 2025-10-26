@@ -48,7 +48,9 @@ generate_stubs_for_handler(Module) ->
             case UndocumentedRoutes of
                 [] ->
                     iolist_to_binary([
-                        <<"%% Module: ">>, atom_to_binary(Module, utf8), <<"\n">>,
+                        <<"%% Module: ">>,
+                        atom_to_binary(Module, utf8),
+                        <<"\n">>,
                         <<"%% All routes are documented!\n">>
                     ]);
                 _ ->
@@ -59,7 +61,9 @@ generate_stubs_for_handler(Module) ->
             end;
         {error, _Reason} ->
             iolist_to_binary([
-                <<"%% Module: ">>, atom_to_binary(Module, utf8), <<"\n">>,
+                <<"%% Module: ">>,
+                atom_to_binary(Module, utf8),
+                <<"\n">>,
                 <<"%% ERROR: Could not parse handler\n">>
             ])
     end.
@@ -76,7 +80,9 @@ format_stub_code(Info) ->
 
     Header = iolist_to_binary([
         <<"%% ============================================================\n">>,
-        <<"%% Module: ">>, atom_to_binary(Module, utf8), <<"\n">>,
+        <<"%% Module: ">>,
+        atom_to_binary(Module, utf8),
+        <<"\n">>,
         <<"%% Add this function to your handler module\n">>,
         <<"%% ============================================================\n\n">>
     ]),
@@ -127,11 +133,17 @@ generate_metadata_clause(Route) ->
     MethodSpecsCode = iolist_to_binary(lists:join(<<",\n                ">>, MethodSpecs)),
 
     iolist_to_binary([
-        <<"openapi_metadata(">>, atom_to_binary(OpId, utf8), <<") ->\n">>,
+        <<"openapi_metadata(">>,
+        atom_to_binary(OpId, utf8),
+        <<") ->\n">>,
         <<"    #{\n">>,
         <<"        paths => #{\n">>,
-        <<"            <<\"">>, Path, <<"\">> => #{\n">>,
-        <<"                ">>, MethodSpecsCode, <<"\n">>,
+        <<"            <<\"">>,
+        Path,
+        <<"\">> => #{\n">>,
+        <<"                ">>,
+        MethodSpecsCode,
+        <<"\n">>,
         <<"            }\n">>,
         <<"        }\n">>,
         <<"    }">>
@@ -149,10 +161,15 @@ generate_method_spec(Method, Path) ->
     OpId = generate_operation_id(Method, Path),
 
     iolist_to_binary([
-        MethodLower, <<" => #{\n">>,
+        MethodLower,
+        <<" => #{\n">>,
         <<"                    tags => [<<\"TODO\">>],\n">>,
-        <<"                    summary => <<\"">>, Summary, <<"\">>,\n">>,
-        <<"                    operationId => <<\"">>, OpId, <<"\">>,\n">>,
+        <<"                    summary => <<\"">>,
+        Summary,
+        <<"\">>,\n">>,
+        <<"                    operationId => <<\"">>,
+        OpId,
+        <<"\">>,\n">>,
         <<"                    responses => #{\n">>,
         <<"                        <<\"200\">> => #{\n">>,
         <<"                            description => <<\"Success\">>\n">>,
