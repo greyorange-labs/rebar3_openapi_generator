@@ -36,8 +36,15 @@ Add the plugin to your `rebar.config`:
 Generate an OpenAPI specification for your application:
 
 ```bash
+# First, compile your application
+rebar3 compile
+
+# Then generate the OpenAPI spec
+# This automatically discovers ALL handlers that export trails/0
 rebar3 openapi generate --app my_app
 ```
+
+> **Note:** The `--app` parameter specifies which application to scan. The plugin will automatically discover all modules in that application that export `trails/0`. You don't need to specify individual handlers.
 
 ### Command Options
 
@@ -64,6 +71,41 @@ rebar3 openapi generate --app myapp --validate true
 # Custom output directory
 rebar3 openapi generate --app myapp --output ./api-docs/
 ```
+
+## How Handler Discovery Works
+
+When you run `rebar3 openapi generate --app myapp`, the plugin automatically discovers handlers by:
+
+1. **Locating the Application**: Finds `myapp` in your rebar3 project apps
+2. **Scanning ebin Directory**: Lists all `.beam` files in `_build/default/lib/myapp/ebin/`
+3. **Checking for trails/0 Export**: For each module, checks if it exports `trails/0` function
+4. **Loading Handlers**: Collects all modules that export `trails/0`
+
+**Example Discovery Process:**
+
+```erlang
+% Your project structure:
+myapp/
+  src/
+    user_handler.erl      % exports trails/0 ✓ (discovered)
+    admin_handler.erl     % exports trails/0 ✓ (discovered)
+    payment_handler.erl   % exports trails/0 ✓ (discovered)
+    user_service.erl      % no trails/0     ✗ (ignored)
+    utils.erl             % no trails/0     ✗ (ignored)
+```
+
+After compilation, the plugin will:
+1. Find all 3 handler modules (`user_handler`, `admin_handler`, `payment_handler`)
+2. Call `trails/0` on each
+3. Extract all routes and metadata
+4. Generate a single unified OpenAPI specification
+
+**Key Requirements:**
+- ✅ Handlers must be compiled (run `rebar3 compile` first)
+- ✅ Handlers must export `trails/0` function
+- ✅ Handlers must use `-behaviour(trails_handler)` (recommended but not required)
+
+**No Configuration Needed:** The plugin automatically finds ALL handlers in your app that export `trails/0`. You don't need to manually specify which handlers to scan.
 
 ## Handler Metadata Format
 
@@ -743,16 +785,17 @@ rebar3 format
 
 ## How It Works
 
-1. **Discovery Phase**
-   - Scans the target application's `ebin` directory
-   - Identifies modules exporting `trails/0` function
+1. **Discovery Phase** (Automatic)
+   - Scans the target application's `ebin` directory for all `.beam` files
+   - Automatically identifies ALL modules exporting `trails/0` function
    - Loads and validates handler modules
+   - **No manual configuration required** - finds all handlers automatically
 
 2. **Parsing Phase**
-   - Calls `trails/0` on each handler module
-   - Extracts trail definitions with metadata
+   - Calls `trails/0` on each discovered handler module
+   - Extracts trail definitions with metadata (supports inline and function-based patterns)
    - Normalizes path parameters (`:id` → `{id}`)
-   - Detects HTTP methods from metadata keys
+   - Detects HTTP methods from metadata keys (GET, POST, PUT, DELETE, PATCH, etc.)
 
 3. **Building Phase**
    - Constructs OpenAPI 3.x structure
