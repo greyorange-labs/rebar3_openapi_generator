@@ -19,6 +19,12 @@ parse_openapi_file(FilePath) ->
 -spec parse_openapi_yaml(binary()) -> {ok, map()} | {error, term()}.
 parse_openapi_yaml(YamlContent) ->
     try
+        % Ensure yamerl application is started
+        case application:ensure_all_started(yamerl) of
+            {ok, _} -> ok;
+            {error, _} -> application:start(yamerl)
+        end,
+
         % Parse YAML to Erlang terms
         [Doc] = yamerl_constr:string(binary_to_list(YamlContent)),
 

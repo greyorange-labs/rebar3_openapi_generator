@@ -917,6 +917,85 @@ The plugin follows a modular architecture with clear separation of concerns:
   - `cowboy` - For Cowboy types
   - `trails` - For trails metadata
 
+## Testing the Plugin Without Installing
+
+The repository includes `test_import.escript`, a standalone script to test the OpenAPI import functionality **without importing the plugin into an existing project**. This is useful for:
+
+- Testing OpenAPI specs before integrating into your project
+- Debugging YAML parsing issues
+- Validating generated code structure
+- Learning how the import feature works
+
+### Usage
+
+```bash
+# Basic usage
+./test_import.escript your_openapi_spec.yaml
+
+# With custom options
+./test_import.escript your_spec.yaml \
+  --output test_output/ \
+  --handler-module my_handler \
+  --metadata-module my_metadata
+```
+
+### Options
+
+| Option              | Description                                      | Default              |
+| ------------------- | ------------------------------------------------ | -------------------- |
+| `--output`          | Output directory for generated files             | `src/`               |
+| `--handler-module`  | Name for generated trails handler module         | `generated_handler`  |
+| `--metadata-module` | Name for generated metadata module               | `generated_metadata` |
+| `--handler-name`    | Handler to use in trails (e.g., my_http_handler) | `handler_module`     |
+
+### Example
+
+```bash
+# Create a test OpenAPI spec
+cat > test_api.yaml << 'EOF'
+openapi: 3.0.3
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users/{id}:
+    get:
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+EOF
+
+# Run the test script
+./test_import.escript test_api.yaml --output test_output/
+
+# Check generated files
+ls test_output/
+# generated_handler.erl  generated_metadata.erl
+```
+
+### What It Does
+
+The script performs the same steps as `rebar3 openapi import`:
+
+1. ✅ Parses the OpenAPI YAML specification (ensures yamerl is started)
+2. ✅ Generates metadata module with cowboy_swagger format
+3. ✅ Generates handler module with trails definitions
+4. ✅ Writes formatted Erlang code to files
+5. ✅ Provides detailed output and error messages
+
+### Notes
+
+- **Requires compilation first**: Run `rebar3 compile` before using the script
+- **Same functionality**: Equivalent to the rebar3 plugin but standalone
+- **Testing only**: Use `rebar3 openapi import` for production
+
 ## Development
 
 ### Building

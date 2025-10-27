@@ -468,8 +468,11 @@ path_to_function_name(Path, Method) when is_binary(Path), is_binary(Method) ->
     % Replace special characters with underscores
     SafePath = re:replace(CleanPath, "[^a-zA-Z0-9]+", "_", [global, {return, list}]),
 
+    % Remove trailing underscores
+    TrimmedPath = string:trim(SafePath, trailing, "_"),
+
     % Combine with method
-    binary_to_list(Method) ++ "_" ++ string:to_lower(SafePath).
+    binary_to_list(Method) ++ "_" ++ string:to_lower(TrimmedPath).
 
 %% Extract media types from responses
 extract_response_media_types(Responses) ->
