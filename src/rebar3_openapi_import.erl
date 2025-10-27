@@ -162,21 +162,40 @@ generate_fresh_handler(FilePath, HandlerModule, MetadataModule, HandlerName, Pat
     FinalCode = re:replace(FormattedCode, "handler_module", HandlerName, [global, {return, list}]),
     file:write_file(FilePath, FinalCode).
 
-%% Format files using rebar3_format if available
+%% Format files using erlfmt
 format_files(Files) ->
     lists:foreach(
         fun(File) ->
             try
-                rebar_api:info("Formatting ~s", [File]),
-                % This would call rebar3_format if it's available
-                % For now, we'll skip actual formatting
-                ok
+                rebar_api:info("Formatting ~s with erlfmt", [File]),
+                format_file_with_erlfmt(File)
             catch
-                _:_ -> ok
+                Error:Reason ->
+                    rebar_api:warn("Failed to format ~s: ~p:~p", [File, Error, Reason]),
+                    ok
             end
         end,
         Files
     ).
+
+%% Format a single file with erlfmt
+format_file_with_erlfmt(FilePath) ->
+    case file:read_file(FilePath) of
+        {ok, Content} ->
+            try
+                % Use erlfmt to format the code
+                Formatted = erlfmt:format_string(binary_to_list(Content)),
+                file:write_file(FilePath, Formatted),
+                ok
+            catch
+                _:_ ->
+                    % If erlfmt fails, keep original
+                    rebar_api:debug("erlfmt not available or failed, keeping original format", []),
+                    ok
+            end;
+        {error, _} = Error ->
+            Error
+    end.
 
 %% Print usage instructions
 print_usage_instructions(HandlerModule, MetadataModule) ->
@@ -342,8 +361,7 @@ update_metadata_module(ExistingContent, ModuleName, NewFunctions, ToAdd, ToUpdat
     % In a more sophisticated version, we'd do AST-level merging
 
     % Extract existing functions that are not being updated
-    ExistingFuncs = extract_metadata_functions(ExistingContent),
-    ToKeep = ExistingFuncs -- ToUpdate,
+    _ExistingFuncs = extract_metadata_functions(ExistingContent),
 
     % Generate new module with all functions
     AllPaths = reconstruct_paths_from_functions(NewFunctions, ToAdd ++ ToUpdate),

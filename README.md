@@ -885,7 +885,7 @@ trails() ->
 - ✅ Simpler testing of metadata definitions
 - ✅ Improved code readability
 
-> **✅ Verified:** The plugin fully supports function-based and resource module patterns. Metadata defined in separate functions or resource modules is correctly extracted and included in the generated OpenAPI specification. See `test_resource_pattern.erl` for a working example.
+> **✅ Verified:** The plugin fully supports function-based and resource module patterns. Metadata defined in separate functions or resource modules is correctly extracted and included in the generated OpenAPI specification. See `test_export_openapi.escript` for verification.
 
 ### Path Parameters
 
@@ -1060,12 +1060,46 @@ rebar3 compile
 
 ### Testing
 
-The project includes test fixtures demonstrating the cowboy_swagger format:
+The project includes test scripts for both directions of the plugin:
+
+#### 1. Test Export OpenAPI (Erlang → OpenAPI YAML)
+Tests parser and OpenAPI spec generation from Erlang handler code:
 
 ```bash
-# Run the test script
-./test_cowboy_swagger.erl
+# Compile first
+rebar3 compile
+
+# Run with test handler
+./test_export_openapi.escript test_cowboy_swagger_handler
 ```
+
+**What it tests:**
+- Parser functionality (cowboy_swagger format, method extraction, path normalization)
+- Handler parsing and metadata extraction
+- OpenAPI spec generation
+- YAML output
+
+**When to use:** Verify the complete flow of generating OpenAPI YAML from your Erlang handler code.
+
+#### 2. Test OpenAPI YAML → Erlang
+Tests generation/update of Erlang code from OpenAPI specification:
+
+```bash
+./test_import_openapi.escript <openapi.yml> <handler.erl> <metadata_module>
+
+# Example
+./test_import_openapi.escript test_output/test_api.yml my_handler.erl my_metadata
+```
+
+**What it tests:**
+- OpenAPI YAML parsing
+- Handler trails() function updates
+- Metadata module generation
+- Code formatting with erlfmt
+
+**When to use:** Test updating handlers and generating metadata modules from OpenAPI docs.
+
+**Output:** All generated files go to `test_output/` directory.
 
 ### Code Style
 

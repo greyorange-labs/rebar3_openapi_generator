@@ -306,10 +306,13 @@ format_response(StatusCode, #{description := Desc} = Response, Indent) ->
             _ -> [",\n", Indent, "    content => ", format_content(Content, Indent ++ "    ")]
         end,
 
+    % Normalize status code to string
+    StatusCodeStr = normalize_status_code(StatusCode),
+
     [
         Indent,
         "<<\"",
-        StatusCode,
+        StatusCodeStr,
         "\">> => #{\n",
         Indent,
         "    description => <<\"",
@@ -479,7 +482,8 @@ extract_response_media_types(Responses) ->
     MediaTypes = lists:flatmap(
         fun({StatusCode, Response}) ->
             % Only extract from 2xx responses
-            case binary_to_list(StatusCode) of
+            StatusStr = normalize_status_code(StatusCode),
+            case StatusStr of
                 [$2 | _] ->
                     Content = maps:get(content, Response, #{}),
                     maps:keys(Content);
@@ -491,6 +495,16 @@ extract_response_media_types(Responses) ->
     ),
 
     lists:usort(MediaTypes).
+
+%% Normalize status code to string
+normalize_status_code(Code) when is_binary(Code) ->
+    binary_to_list(Code);
+normalize_status_code(Code) when is_integer(Code) ->
+    integer_to_list(Code);
+normalize_status_code(Code) when is_atom(Code) ->
+    atom_to_list(Code);
+normalize_status_code(Code) when is_list(Code) ->
+    Code.
 
 %% Format string array
 format_string_array(List) when is_list(List) ->
