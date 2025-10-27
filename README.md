@@ -230,6 +230,59 @@ The import functionality provides:
 - Handler name substitution
 - Overwrite protection
 
+✅ **Incremental Updates** (New!)
+- Smart merging when files already exist
+- Adds new paths to existing handlers
+- Creates missing metadata functions
+- Updates existing metadata functions with new definitions
+- Preserves your custom code
+
+#### Incremental Update Behavior
+
+When you run `rebar3 openapi import` and the target files already exist:
+
+**Without `--overwrite` flag (default):**
+- 📥 **Metadata Module**: Adds new metadata functions and updates existing ones
+  - New paths → new functions added
+  - Existing paths → function implementations updated
+  - Preserves module structure
+
+- 📥 **Handler Module**: Adds new trails for paths not already defined
+  - Checks existing `trails:trail(...)` definitions
+  - Only adds trails for new paths
+  - Doesn't duplicate existing routes
+
+**With `--overwrite` flag:**
+- ⚠️ **Complete Regeneration**: Replaces entire files with fresh generated code
+- Use when you want to start from scratch with the OpenAPI spec
+
+**Examples:**
+
+```bash
+# First import - generates fresh files
+rebar3 openapi import --spec api_v1.yaml
+
+# Later, add new endpoints - merges into existing files
+rebar3 openapi import --spec api_v2.yaml
+
+# Force complete regeneration
+rebar3 openapi import --spec api_v3.yaml --overwrite
+```
+
+**What Gets Merged:**
+
+| Scenario                          | Metadata Module      | Handler Module         |
+| --------------------------------- | -------------------- | ---------------------- |
+| Path not in existing code         | ✅ New function added | ✅ New trail added      |
+| Path exists, no metadata function | ✅ Function created   | ℹ️ Trail already exists |
+| Path exists with metadata         | ✅ Function updated   | ℹ️ Trail already exists |
+
+**Benefits:**
+- 🔄 Iterative API development
+- 🛡️ Preserves custom modifications
+- 📈 Incremental spec updates
+- 🚀 Faster development workflow
+
 #### Benefits of Import
 
 🎯 **Design-First Development** - Start with OpenAPI spec, generate handlers
@@ -238,6 +291,7 @@ The import functionality provides:
 🚀 **Developer Productivity** - Auto-generate boilerplate code
 ✅ **Type Safety** - Schema definitions become Erlang metadata
 🔧 **Maintainability** - Single source of truth (OpenAPI spec)
+♻️ **Incremental Updates** - Merge new specs into existing code
 
 ## How Handler Discovery Works
 

@@ -114,10 +114,21 @@ generate_files(ParsedSpec, Opts, State) ->
 
 %% Generate metadata file
 generate_metadata_file(FilePath, ModuleName, Paths, Overwrite) ->
-    case filelib:is_file(FilePath) andalso not Overwrite of
-        true ->
-            {error, {file_exists, FilePath}};
-        false ->
+    FileExists = filelib:is_file(FilePath),
+
+    case {FileExists, Overwrite} of
+        {true, false} ->
+            % File exists and not overwriting - try to merge
+            rebar_api:info("File exists: ~s - attempting to merge new metadata functions", [FilePath]),
+            merge_metadata_file(FilePath, ModuleName, Paths);
+        {true, true} ->
+            % File exists but overwrite requested - regenerate completely
+            rebar_api:info("Overwriting existing file: ~s", [FilePath]),
+            Code = openapi_code_generator:generate_metadata_module(ModuleName, Paths, #{}),
+            FormattedCode = openapi_code_generator:format_erlang_code(Code),
+            file:write_file(FilePath, FormattedCode);
+        {false, _} ->
+            % File doesn't exist - generate fresh
             Code = openapi_code_generator:generate_metadata_module(ModuleName, Paths, #{}),
             FormattedCode = openapi_code_generator:format_erlang_code(Code),
             file:write_file(FilePath, FormattedCode)
@@ -125,22 +136,31 @@ generate_metadata_file(FilePath, ModuleName, Paths, Overwrite) ->
 
 %% Generate handler file
 generate_handler_file(FilePath, HandlerModule, MetadataModule, HandlerName, Paths, Overwrite) ->
-    case filelib:is_file(FilePath) andalso not Overwrite of
-        true ->
-            {error, {file_exists, FilePath}};
-        false ->
-            % Update paths to use the specified handler name
-            Code = openapi_code_generator:generate_trails_module(HandlerModule, Paths, #{
-                handler_name => HandlerName,
-                metadata_module => MetadataModule
-            }),
-            FormattedCode = openapi_code_generator:format_erlang_code(Code),
+    FileExists = filelib:is_file(FilePath),
 
-            % Replace placeholder with actual handler name
-            FinalCode = re:replace(FormattedCode, "handler_module", HandlerName, [global, {return, list}]),
-
-            file:write_file(FilePath, FinalCode)
+    case {FileExists, Overwrite} of
+        {true, false} ->
+            % File exists and not overwriting - try to merge
+            rebar_api:info("File exists: ~s - attempting to merge new trails", [FilePath]),
+            merge_handler_file(FilePath, HandlerModule, MetadataModule, HandlerName, Paths);
+        {true, true} ->
+            % File exists but overwrite requested - regenerate completely
+            rebar_api:info("Overwriting existing file: ~s", [FilePath]),
+            generate_fresh_handler(FilePath, HandlerModule, MetadataModule, HandlerName, Paths);
+        {false, _} ->
+            % File doesn't exist - generate fresh
+            generate_fresh_handler(FilePath, HandlerModule, MetadataModule, HandlerName, Paths)
     end.
+
+%% Generate a fresh handler file
+generate_fresh_handler(FilePath, HandlerModule, MetadataModule, HandlerName, Paths) ->
+    Code = openapi_code_generator:generate_trails_module(HandlerModule, Paths, #{
+        handler_name => HandlerName,
+        metadata_module => MetadataModule
+    }),
+    FormattedCode = openapi_code_generator:format_erlang_code(Code),
+    FinalCode = re:replace(FormattedCode, "handler_module", HandlerName, [global, {return, list}]),
+    file:write_file(FilePath, FinalCode).
 
 %% Format files using rebar3_format if available
 format_files(Files) ->
@@ -168,13 +188,17 @@ print_usage_instructions(HandlerModule, MetadataModule) ->
     rebar_api:info("   - ~s.erl (metadata definitions)", [MetadataModule]),
     rebar_api:info("   - ~s.erl (trails handler)", [HandlerModule]),
     rebar_api:info("", []),
-    rebar_api:info("2. Update the handler module names in ~s.erl", [HandlerModule]),
-    rebar_api:info("   Replace 'handler_module' with your actual HTTP handler", []),
+    rebar_api:info("2. In ~s.erl, replace 'handler_module' with your actual HTTP handler", [HandlerModule]),
+    rebar_api:info("   Example: change 'handler_module' to 'my_http_handler'", []),
     rebar_api:info("", []),
-    rebar_api:info("3. Integrate into your Cowboy routes:", []),
-    rebar_api:info("   trails:trails([~s])", [HandlerModule]),
+    rebar_api:info("3. Implement the HTTP handler callbacks (init/2, handle/2, etc.)", []),
     rebar_api:info("", []),
-    rebar_api:info("4. Compile and test:", []),
+    rebar_api:info("4. Integrate into your Cowboy routes:", []),
+    rebar_api:info("   Trails = trails:trails([~s]),", [HandlerModule]),
+    rebar_api:info("   trails:store(Trails),", []),
+    rebar_api:info("   Dispatch = trails:single_host_compile(Trails)", []),
+    rebar_api:info("", []),
+    rebar_api:info("5. Compile and test:", []),
     rebar_api:info("   rebar3 compile", []),
     rebar_api:info("=================================================================", []),
     ok.
@@ -195,3 +219,227 @@ format_error({file_exists, FilePath}) ->
     io_lib:format("File already exists: ~s (use --overwrite to replace)", [FilePath]);
 format_error(Reason) ->
     io_lib:format("~p", [Reason]).
+
+%% Merge new metadata functions into existing file
+merge_metadata_file(FilePath, ModuleName, NewPaths) ->
+    case file:read_file(FilePath) of
+        {ok, ExistingContent} ->
+            % Extract existing function names and generate new ones
+            ExistingFunctions = extract_metadata_functions(ExistingContent),
+            NewFunctions = generate_metadata_function_map(NewPaths),
+
+            % Find functions to add or update
+            {ToAdd, ToUpdate} = classify_functions(NewFunctions, ExistingFunctions),
+
+            case {length(ToAdd), length(ToUpdate)} of
+                {0, 0} ->
+                    rebar_api:info("No new or updated functions to merge", []),
+                    ok;
+                {AddCount, UpdateCount} ->
+                    rebar_api:info("Adding ~p new function(s), updating ~p existing function(s)",
+                                  [AddCount, UpdateCount]),
+
+                    % Generate updated content
+                    UpdatedContent = update_metadata_module(ExistingContent, ModuleName,
+                                                           NewFunctions, ToAdd, ToUpdate),
+                    file:write_file(FilePath, UpdatedContent)
+            end;
+        {error, Reason} ->
+            {error, {read_failed, Reason}}
+    end.
+
+%% Merge new trails into existing handler file
+merge_handler_file(FilePath, _HandlerModule, MetadataModule, HandlerName, NewPaths) ->
+    case file:read_file(FilePath) of
+        {ok, ExistingContent} ->
+            % Extract existing trail paths
+            ExistingPaths = extract_trail_paths(ExistingContent),
+
+            % Find paths to add
+            PathsToAdd = lists:filter(
+                fun(PathData) ->
+                    Path = maps:get(path, PathData),
+                    CowboyPath = normalize_path_for_cowboy(binary_to_list(Path)),
+                    not lists:member(CowboyPath, ExistingPaths)
+                end,
+                NewPaths
+            ),
+
+            case PathsToAdd of
+                [] ->
+                    rebar_api:info("No new paths to add to handler", []),
+                    ok;
+                _ ->
+                    rebar_api:info("Adding ~p new path(s) to handler", [length(PathsToAdd)]),
+                    UpdatedContent = add_trails_to_module(ExistingContent, PathsToAdd,
+                                                         MetadataModule, HandlerName),
+                    file:write_file(FilePath, UpdatedContent)
+            end;
+        {error, Reason} ->
+            {error, {read_failed, Reason}}
+    end.
+
+%% Extract existing metadata function names from file content
+extract_metadata_functions(Content) ->
+    Pattern = "^([a-z_][a-zA-Z0-9_]*)\\(\\)\\s*->",
+    Lines = binary:split(Content, <<"\n">>, [global]),
+
+    lists:filtermap(
+        fun(Line) ->
+            LineStr = string:trim(binary_to_list(Line)),
+            case re:run(LineStr, Pattern, [{capture, all_but_first, list}]) of
+                {match, [FuncName]} -> {true, FuncName};
+                nomatch -> false
+            end
+        end,
+        Lines
+    ).
+
+%% Generate map of function_name -> function_code for paths
+generate_metadata_function_map(Paths) ->
+    lists:foldl(
+        fun(PathData, Acc) ->
+            Path = maps:get(path, PathData),
+            Operations = maps:get(operations, PathData),
+
+            % For each operation, generate function name
+            maps:fold(
+                fun(Method, _OperationData, InnerAcc) ->
+                    FuncName = path_to_function_name(Path, Method),
+                    InnerAcc#{FuncName => {Path, Method}}
+                end,
+                Acc,
+                Operations
+            )
+        end,
+        #{},
+        Paths
+    ).
+
+%% Convert path and method to function name
+path_to_function_name(Path, Method) when is_binary(Path), is_binary(Method) ->
+    CleanPath = string:trim(binary_to_list(Path), both, "/"),
+    SafePath = re:replace(CleanPath, "[^a-zA-Z0-9]+", "_", [global, {return, list}]),
+    TrimmedPath = string:trim(SafePath, trailing, "_"),
+    binary_to_list(Method) ++ "_" ++ string:to_lower(TrimmedPath).
+
+%% Classify functions as new or updates
+classify_functions(NewFunctions, ExistingFunctions) ->
+    maps:fold(
+        fun(FuncName, _Data, {AddAcc, UpdateAcc}) ->
+            case lists:member(FuncName, ExistingFunctions) of
+                true -> {AddAcc, [FuncName | UpdateAcc]};
+                false -> {[FuncName | AddAcc], UpdateAcc}
+            end
+        end,
+        {[], []},
+        NewFunctions
+    ).
+
+%% Update metadata module content
+update_metadata_module(ExistingContent, ModuleName, NewFunctions, ToAdd, ToUpdate) ->
+    % For simplicity, regenerate the entire module with all functions
+    % In a more sophisticated version, we'd do AST-level merging
+
+    % Extract existing functions that are not being updated
+    ExistingFuncs = extract_metadata_functions(ExistingContent),
+    ToKeep = ExistingFuncs -- ToUpdate,
+
+    % Generate new module with all functions
+    AllPaths = reconstruct_paths_from_functions(NewFunctions, ToAdd ++ ToUpdate),
+    Code = openapi_code_generator:generate_metadata_module(ModuleName, AllPaths, #{}),
+    FormattedCode = openapi_code_generator:format_erlang_code(Code),
+
+    % Add comment about updated functions
+    UpdateComment = case {length(ToAdd), length(ToUpdate)} of
+        {0, 0} -> "";
+        {A, U} ->
+            io_lib:format("%% Updated by rebar3 openapi import: ~p new, ~p updated~n", [A, U])
+    end,
+
+    [UpdateComment, FormattedCode].
+
+%% Reconstruct path data from function map
+reconstruct_paths_from_functions(FunctionMap, FunctionNames) ->
+    % Group by path
+    Grouped = lists:foldl(
+        fun(FuncName, Acc) ->
+            case maps:get(FuncName, FunctionMap, undefined) of
+                undefined -> Acc;
+                {Path, Method} ->
+                    maps:update_with(
+                        Path,
+                        fun(Methods) -> Methods#{Method => #{}} end,
+                        #{Method => #{}},
+                        Acc
+                    )
+            end
+        end,
+        #{},
+        FunctionNames
+    ),
+
+    % Convert to path format
+    maps:fold(
+        fun(Path, Operations, Acc) ->
+            [#{path => Path, operations => Operations} | Acc]
+        end,
+        [],
+        Grouped
+    ).
+
+%% Extract trail paths from handler module
+extract_trail_paths(Content) ->
+    Pattern = "trails:trail\\(\"([^\"]+)\"",
+    case re:run(Content, Pattern, [global, {capture, all_but_first, list}]) of
+        {match, Matches} ->
+            [Path || [Path] <- Matches];
+        nomatch ->
+            []
+    end.
+
+%% Normalize OpenAPI path to Cowboy format
+normalize_path_for_cowboy(Path) ->
+    re:replace(Path, "\\{([^}]+)\\}", ":\\1", [global, {return, list}]).
+
+%% Add new trails to existing module
+add_trails_to_module(ExistingContent, PathsToAdd, MetadataModule, HandlerName) ->
+    % Find the closing bracket of the trails/0 function
+    ContentStr = binary_to_list(ExistingContent),
+
+    % Generate new trail entries
+    NewTrails = lists:map(
+        fun(PathData) ->
+            Path = maps:get(path, PathData),
+            Operations = maps:get(operations, PathData),
+            CowboyPath = normalize_path_for_cowboy(binary_to_list(Path)),
+
+            % Get function name from first operation
+            [FirstMethod | _] = maps:keys(Operations),
+            FuncName = path_to_function_name(Path, FirstMethod),
+
+            io_lib:format("        trails:trail(\"~s\", ~s, [], ~s:~s())",
+                         [CowboyPath, HandlerName, MetadataModule, FuncName])
+        end,
+        PathsToAdd
+    ),
+
+    % Find the last ]. in trails/0 function and insert before it
+    case re:run(ContentStr, "trails\\(\\)\\s*->\\s*\\[(.*?)\\]\\.", [dotall, {capture, all, list}]) of
+        {match, [_FullMatch]} ->
+            % Insert new trails before the closing ].
+            NewTrailsStr = string:join(NewTrails, ",\n"),
+            UpdatedContent = re:replace(ContentStr,
+                                       "(trails\\(\\)\\s*->\\s*\\[.*?)(\\]\\.)$",
+                                       io_lib:format("\\1,\\n~s\\2", [NewTrailsStr]),
+                                       [{return, list}, dotall, multiline]),
+            list_to_binary(UpdatedContent);
+        nomatch ->
+            % Couldn't parse, append comment with trails to add manually
+            Comment = io_lib:format(
+                "\n\n%% New trails to add to trails/0 function:\n%% ~s\n",
+                [string:join(NewTrails, ",\n%% ")]
+            ),
+            <<ExistingContent/binary, (list_to_binary(Comment))/binary>>
+    end.
+
