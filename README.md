@@ -1,9 +1,10 @@
 # rebar3_openapi_generator
 
-A Rebar3 plugin for automatically generating OpenAPI 3.x specifications from Erlang/Cowboy handler modules with `trails` metadata.
+A Rebar3 plugin for bi-directional OpenAPI 3.x integration with Erlang/Cowboy applications.
 
 ## Features
 
+### Generation (Erlang → OpenAPI)
 - 🔍 **Automatic Discovery** - Scans your Cowboy handlers and extracts route metadata
 - 📝 **OpenAPI 3.x Generation** - Creates standards-compliant OpenAPI specifications
 - 📊 **Coverage Reporting** - Identifies documented vs undocumented routes with actionable suggestions
@@ -11,6 +12,13 @@ A Rebar3 plugin for automatically generating OpenAPI 3.x specifications from Erl
 - ✅ **Validation** - Optional spec validation to ensure correctness
 - 🔄 **Cowboy Swagger Compatible** - Supports both trails and cowboy_swagger metadata formats
 - 📐 **Schema Discovery** - Automatically extracts Jesse/JSON schemas from your handlers
+
+### Import (OpenAPI → Erlang)
+- 📥 **OpenAPI Import** - Generate Erlang trails definitions from OpenAPI YAML specs
+- 🏗️ **Code Generation** - Automatically creates handler and metadata modules
+- 🎨 **Metadata Functions** - Generates properly formatted cowboy_swagger metadata
+- 🔗 **Schema Translation** - Converts OpenAPI schemas to Erlang maps
+- 📋 **Complete Parameters** - Generates parameters, request bodies, and responses
 
 ## Installation
 
@@ -31,9 +39,9 @@ Add the plugin to your `rebar.config`:
 
 ## Usage
 
-### Basic Command
+### Generate: Erlang → OpenAPI
 
-Generate an OpenAPI specification for your application:
+Generate an OpenAPI specification from your Erlang handlers:
 
 ```bash
 # First, compile your application
@@ -46,7 +54,7 @@ rebar3 openapi generate --app my_app
 
 > **Note:** The `--app` parameter specifies which application to scan. The plugin will automatically discover all modules in that application that export `trails/0`. You don't need to specify individual handlers.
 
-### Command Options
+#### Generate Command Options
 
 | Option       | Short | Type    | Default           | Description                      |
 | ------------ | ----- | ------- | ----------------- | -------------------------------- |
@@ -56,7 +64,7 @@ rebar3 openapi generate --app my_app
 | `--coverage` | `-c`  | boolean | `true`            | Generate coverage report         |
 | `--validate` | `-v`  | boolean | `false`           | Validate generated spec          |
 
-### Examples
+#### Generate Examples
 
 ```bash
 # Generate YAML spec with coverage report
@@ -71,6 +79,165 @@ rebar3 openapi generate --app myapp --validate true
 # Custom output directory
 rebar3 openapi generate --app myapp --output ./api-docs/
 ```
+
+### Import: OpenAPI → Erlang
+
+Generate Erlang trails definitions from an existing OpenAPI specification:
+
+```bash
+# Import OpenAPI spec and generate Erlang modules
+rebar3 openapi import --spec api-spec.yaml --output src/
+
+# Customize module names
+rebar3 openapi import --spec api-spec.yaml \
+    --handler-module my_api_handler \
+    --metadata-module my_api_metadata \
+    --handler-name my_http_handler
+
+# Overwrite existing files
+rebar3 openapi import --spec api-spec.yaml --overwrite
+```
+
+#### Import Command Options
+
+| Option              | Short | Type    | Default              | Description                                |
+| ------------------- | ----- | ------- | -------------------- | ------------------------------------------ |
+| `--spec`            | `-s`  | string  | *required*           | Path to OpenAPI YAML specification file    |
+| `--output`          | `-o`  | string  | `src/`               | Output directory for generated files       |
+| `--handler-module`  | `-h`  | string  | `generated_handler`  | Name for generated trails handler module   |
+| `--metadata-module` | `-m`  | string  | `generated_metadata` | Name for generated metadata module         |
+| `--handler-name`    |       | string  | `handler_module`     | Handler to use in trails (e.g. my_handler) |
+| `--overwrite`       | `-w`  | boolean | `false`              | Overwrite existing files                   |
+| `--format`          | `-f`  | boolean | `true`               | Format generated code                      |
+
+#### Import Examples
+
+```bash
+# Basic import
+rebar3 openapi import --spec openapi.yaml
+
+# Full customization
+rebar3 openapi import \
+    --spec ./docs/api-spec.yaml \
+    --output src/api/ \
+    --handler-module user_api_trails \
+    --metadata-module user_api_metadata \
+    --handler-name user_http_handler \
+    --overwrite
+
+# Import and skip formatting
+rebar3 openapi import --spec api.yaml --format false
+```
+
+#### What Gets Generated
+
+When you run `rebar3 openapi import`, it creates two files:
+
+1. **Metadata Module** (`*_metadata.erl`):
+   - Contains metadata functions for each API endpoint
+   - One function per operation (e.g., `get_users/0`, `post_user/0`)
+   - Includes full OpenAPI metadata: tags, parameters, schemas, responses
+   - Follows cowboy_swagger format
+
+2. **Handler Module** (`*_handler.erl`):
+   - Implements `trails_handler` behaviour
+   - Exports `trails/0` function
+   - Calls metadata functions from the metadata module
+   - Ready to integrate into your Cowboy routing
+
+**Example Generated Files:**
+
+```erlang
+% generated_metadata.erl
+-module(generated_metadata).
+
+-export([
+    get_v1_users/0,
+    post_v1_users/0,
+    get_v1_users_id/0
+]).
+
+get_v1_users() ->
+    #{
+        get => #{
+            tags => [<<"Users">>],
+            summary => <<"List all users">>,
+            parameters => [...],
+            responses => #{...}
+        }
+    }.
+
+% More functions...
+```
+
+```erlang
+% generated_handler.erl
+-module(generated_handler).
+-behaviour(trails_handler).
+
+-export([trails/0]).
+
+trails() ->
+    [
+        trails:trail("/v1/users", my_http_handler, [], generated_metadata:get_v1_users()),
+        trails:trail("/v1/users", my_http_handler, [], generated_metadata:post_v1_users()),
+        trails:trail("/v1/users/:id", my_http_handler, [], generated_metadata:get_v1_users_id())
+    ].
+```
+
+#### Post-Import Steps
+
+After importing:
+
+1. **Review Generated Files** - Check the generated metadata and trails
+2. **Update Handler References** - Replace `handler_module` with your actual handler
+3. **Integrate Routes** - Add to your Cowboy dispatch configuration:
+   ```erlang
+   Trails = trails:trails([generated_handler]),
+   trails:store(Trails),
+   Dispatch = trails:single_host_compile(Trails)
+   ```
+4. **Compile** - Run `rebar3 compile` to check for errors
+5. **Implement Handlers** - Add actual request handling logic to your HTTP handler
+6. **Generate OpenAPI Spec** (Optional) - Run `rebar3 openapi generate` to create a spec from your implementation
+
+#### Import Features
+
+The import functionality provides:
+
+✅ **Complete OpenAPI 3.x Support**
+- Paths, operations, parameters
+- Request bodies with JSON schemas
+- Response definitions
+- Tags and operation IDs
+- Descriptions and examples
+
+✅ **Schema Translation**
+- OpenAPI schemas → Erlang maps
+- Proper type handling (string, integer, array, object)
+- Enum support
+- Validation constraints (minimum, maximum, minItems, etc.)
+
+✅ **Code Quality**
+- Properly formatted Erlang code
+- Follows cowboy_swagger format
+- Ready for trails integration
+- Compiles without errors
+
+✅ **Flexible Options**
+- Customizable module names
+- Configurable output directory
+- Handler name substitution
+- Overwrite protection
+
+#### Benefits of Import
+
+🎯 **Design-First Development** - Start with OpenAPI spec, generate handlers
+🔄 **Round-Trip Support** - Import → Implement → Export workflow
+📝 **Standards Compliance** - OpenAPI 3.x compatible
+🚀 **Developer Productivity** - Auto-generate boilerplate code
+✅ **Type Safety** - Schema definitions become Erlang metadata
+🔧 **Maintainability** - Single source of truth (OpenAPI spec)
 
 ## How Handler Discovery Works
 

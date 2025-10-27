@@ -9,6 +9,8 @@ This module initializes all providers for the plugin.
 
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
-    %% Initialize the openapi provider
+    %% Initialize the openapi generate provider
     {ok, State1} = rebar3_openapi:init(State),
-    {ok, State1}.
+    %% Initialize the openapi import provider
+    {ok, State2} = rebar3_openapi_import:init(State1),
+    {ok, State2}.
