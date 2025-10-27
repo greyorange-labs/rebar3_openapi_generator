@@ -60,10 +60,10 @@ execute_import(SpecFile, Opts, State) ->
         {ok, ParsedSpec} ->
             generate_files(ParsedSpec, Opts, State);
         {error, Reason} ->
+            rebar_api:error("Parse error details: ~p", [Reason]),
             {error, format_parse_error(Reason)}
+        %% Generate Erlang files from parsed spec
     end.
-
-%% Generate Erlang files from parsed spec
 generate_files(ParsedSpec, Opts, State) ->
     OutputDir = proplists:get_value(output, Opts),
     HandlerModule = list_to_atom(proplists:get_value(handler_module, Opts)),

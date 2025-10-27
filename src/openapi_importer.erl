@@ -37,6 +37,8 @@ parse_openapi_yaml(YamlContent) ->
     catch
         throw:Exception ->
             {error, {yaml_parse_error, Exception}};
+        error:{badmatch, _} = Error:Stack ->
+            {error, {parse_error, Error, Stack}};
         error:Reason:Stack ->
             {error, {parse_error, Reason, Stack}}
     end.
@@ -80,14 +82,18 @@ extract_paths(_) ->
 
 %% @doc Extract operations for a single path
 -spec extract_path_operations(binary(), map()) -> map().
-extract_path_operations(PathPattern, Operations) ->
+extract_path_operations(PathPattern, Operations) when is_map(Operations) ->
     HttpMethods = [<<"get">>, <<"post">>, <<"put">>, <<"patch">>, <<"delete">>, <<"head">>, <<"options">>],
 
     Ops = lists:filtermap(
         fun(Method) ->
             case maps:get(Method, Operations, undefined) of
-                undefined -> false;
-                OpSpec -> {true, {Method, normalize_operation(OpSpec)}}
+                undefined ->
+                    false;
+                OpSpec when is_map(OpSpec) ->
+                    {true, {Method, normalize_operation(OpSpec)}};
+                _ ->
+                    false
             end
         end,
         HttpMethods
@@ -97,6 +103,12 @@ extract_path_operations(PathPattern, Operations) ->
         path => PathPattern,
         operations => maps:from_list(Ops),
         parameters => maps:get(<<"parameters">>, Operations, [])
+    };
+extract_path_operations(PathPattern, _InvalidOperations) ->
+    #{
+        path => PathPattern,
+        operations => #{},
+        parameters => []
     }.
 
 %% @doc Normalize an operation specification
