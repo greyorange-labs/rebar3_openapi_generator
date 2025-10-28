@@ -523,7 +523,7 @@ add_trails_to_module(ExistingContent, PathsToAdd, MetadataModule, HandlerName) -
 
     % First, try to find trails/0 function and insert TODO at the beginning
     case re:run(ContentStr, "^(trails\\(\\)\\s*->)", [multiline, {capture, all, index}]) of
-        {match, [{Start, Len}]} ->
+        {match, [_FullMatch, {Start, Len}]} ->
             % Found trails() function, add TODO comment right after the function declaration
             NewTrailsStr = string:join(NewTrails, "\n%%         "),
             
@@ -551,7 +551,7 @@ add_trails_to_module(ExistingContent, PathsToAdd, MetadataModule, HandlerName) -
             {Before, After} = lists:split(Start + Len, ContentStr),
             UpdatedContent = Before ++ TodoComment ++ After,
             list_to_binary(UpdatedContent);
-        nomatch ->
+        _ ->
             % Couldn't find trails/0 function, append comment at end as fallback
             Comment = io_lib:format(
                 "\n\n%% TODO: Add trails/0 function or modify existing routing\n"
