@@ -204,8 +204,9 @@ has_operation_fields(OpSpec) ->
     % Check for required fields
     HasSummary = maps:is_key(summary, OpSpec),
     HasOperationId = maps:is_key(operationId, OpSpec),
-    HasResponses = maps:is_key(responses, OpSpec) andalso
-        map_size(maps:get(responses, OpSpec, #{})) > 0,
+    HasResponses =
+        maps:is_key(responses, OpSpec) andalso
+            map_size(maps:get(responses, OpSpec, #{})) > 0,
 
     % All required fields must be present
     HasSummary andalso HasOperationId andalso HasResponses.
@@ -237,7 +238,8 @@ check_route_completeness(Path, Method, Metadata) ->
             MethodLower = string:lowercase(binary_to_list(MethodBin)),
             case maps:get(list_to_binary(MethodLower), MethodsMap, undefined) of
                 undefined ->
-                    [#{path => Path, method => MethodBin, issues => [<<"No metadata defined">>]}];
+                    % Method exists in route but has no metadata at all
+                    [];
                 OpSpec ->
                     Issues = collect_operation_issues(OpSpec, MethodBin),
                     case Issues of
@@ -257,42 +259,50 @@ collect_operation_issues(OpSpec, Method) ->
     Issues = [],
 
     % Check required fields
-    Issues1 = case maps:is_key(summary, OpSpec) of
-        false -> [<<"Missing 'summary' field">> | Issues];
-        true -> Issues
-    end,
+    Issues1 =
+        case maps:is_key(summary, OpSpec) of
+            false -> [<<"Missing 'summary' field">> | Issues];
+            true -> Issues
+        end,
 
-    Issues2 = case maps:is_key(operationId, OpSpec) of
-        false -> [<<"Missing 'operationId' field">> | Issues1];
-        true -> Issues1
-    end,
+    Issues2 =
+        case maps:is_key(operationId, OpSpec) of
+            false -> [<<"Missing 'operationId' field">> | Issues1];
+            true -> Issues1
+        end,
 
-    Issues3 = case maps:is_key(responses, OpSpec) of
-        false -> [<<"Missing 'responses' field">> | Issues2];
-        true ->
-            % Check response content
-            check_response_completeness(OpSpec, Issues2)
-    end,
+    Issues3 =
+        case maps:is_key(responses, OpSpec) of
+            false ->
+                [<<"Missing 'responses' field">> | Issues2];
+            true ->
+                % Check response content
+                check_response_completeness(OpSpec, Issues2)
+        end,
 
     % Check requestBody for POST/PUT/PATCH
-    Issues4 = case should_have_request_body(Method) of
-        true ->
-            case maps:is_key(requestBody, OpSpec) of
-                false -> [<<"Missing 'requestBody' for ", Method/binary, " request">> | Issues3];
-                true ->
-                    case maps:is_key(content, OpSpec) of
-                        false -> [<<"requestBody missing 'content' definition">> | Issues3];
-                        true -> Issues3
-                    end
-            end;
-        false -> Issues3
-    end,
+    Issues4 =
+        case should_have_request_body(Method) of
+            true ->
+                case maps:is_key(requestBody, OpSpec) of
+                    false ->
+                        [<<"Missing 'requestBody' for ", Method/binary, " request">> | Issues3];
+                    true ->
+                        case maps:is_key(content, OpSpec) of
+                            false -> [<<"requestBody missing 'content' definition">> | Issues3];
+                            true -> Issues3
+                        end
+                end;
+            false ->
+                Issues3
+        end,
 
     % Check tags
-    Issues5 = case maps:is_key(tags, OpSpec) of
-        false -> [<<"Missing 'tags' (recommended for grouping)">> | Issues4];
-        true -> Issues4
-    end,
+    Issues5 =
+        case maps:is_key(tags, OpSpec) of
+            false -> [<<"Missing 'tags' (recommended for grouping)">> | Issues4];
+            true -> Issues4
+        end,
 
     Issues5.
 
@@ -371,10 +381,15 @@ generate_suggestions(UndocumentedRoutes, IncompleteRoutes) ->
             Path = maps:get(path, IncompleteRoute),
             Method = maps:get(method, IncompleteRoute),
             Issues = maps:get(issues, IncompleteRoute),
-            IssuesStr = lists:join(<<", ">>, Issues),
+            NumIssues = length(Issues),
             iolist_to_binary([
-                <<"Fix ">>, Path, <<" [">>, Method, <<"]: ">>,
-                lists:join(<<"; ">>, IssuesStr)
+                <<"Complete API documentation for ">>,
+                Path,
+                <<" [">>,
+                Method,
+                <<"]: ">>,
+                integer_to_binary(NumIssues),
+                <<" field(s) need to be added/fixed to meet OpenAPI 3.0.3 standards">>
             ])
         end,
         IncompleteRoutes
@@ -487,8 +502,10 @@ format_handler_coverage(HandlerCov) ->
                     Method = maps:get(method, IncompleteRoute),
                     Issues = maps:get(issues, IncompleteRoute),
                     IssueStr = lists:join(<<", ">>, Issues),
-                    io_lib:format("  * Incomplete: ~s [~s] (~s)~n",
-                        [Path, Method, IssueStr])
+                    io_lib:format(
+                        "  * Incomplete: ~s [~s] (~s)~n",
+                        [Path, Method, IssueStr]
+                    )
                 end,
                 Incomplete
             ),
@@ -498,14 +515,16 @@ format_handler_coverage(HandlerCov) ->
                     [] ->
                         [];
                     _ ->
-                        ["  [!] Suggestions:\n"
-                         | lists:map(
-                             fun(Suggestion) ->
-                                 io_lib:format("     - ~s~n", [Suggestion])
-                             end,
-                             % Show max 5 suggestions
-                             lists:sublist(Suggestions, 5)
-                         )]
+                        [
+                            "  [!] Suggestions:\n"
+                            | lists:map(
+                                fun(Suggestion) ->
+                                    io_lib:format("     - ~s~n", [Suggestion])
+                                end,
+                                % Show max 5 suggestions
+                                lists:sublist(Suggestions, 5)
+                            )
+                        ]
                 end,
 
             [ModuleLine, UndocLines, IncompleteLines, SuggestionLines]
