@@ -23,14 +23,13 @@ init(State) ->
         {namespace, ?NAMESPACE},
         {bare, false},
         {deps, ?DEPS},
-        {example, "rebar3 openapi generate --app put"},
+        {example, "rebar3 openapi generate --app myapp --destination ./docs/api.yml"},
         {short_desc, "Generate OpenAPI specs from Cowboy handlers"},
         {desc,
             "Scans Cowboy handler modules in an application and generates OpenAPI 3.x specifications with coverage reporting."},
         {opts, [
             {app, $a, "app", atom, "Target application name (required)"},
-            {output, $o, "output", string, "Output directory (default: ./docs/openapi/)"},
-            {format, $f, "format", {string, "yaml"}, "Output format: yaml or json (default: yaml)"},
+            {destination, $d, "destination", string, "Output file path with filename, e.g. ./docs/api.yml (required)"},
             {coverage, $c, "coverage", {boolean, true}, "Generate coverage report (default: true)"},
             {validate, $v, "validate", {boolean, false}, "Validate generated spec (default: false)"}
         ]}
@@ -41,12 +40,74 @@ init(State) ->
 do(State) ->
     {Args, _} = rebar_state:command_parsed_args(State),
 
+    % Validate required parameters
+    case validate_required_params(Args) of
+        ok ->
+            AppName = proplists:get_value(app, Args),
+            Destination = proplists:get_value(destination, Args),
+            execute_generation(State, AppName, Destination, Args);
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+-doc """
+-------------------------------------------------------------------------------------------
+Validates required parameters for the generate command.
+-------------------------------------------------------------------------------------------
+""".
+-spec validate_required_params(proplists:proplist()) -> ok | {error, atom()}.
+validate_required_params(Args) ->
     case proplists:get_value(app, Args) of
         undefined ->
-            rebar_api:error("--app parameter is required", []),
+            rebar_api:error("Missing required parameter: --app <app_name>", []),
             {error, missing_app_parameter};
-        AppName ->
-            execute_generation(State, AppName, Args)
+        _ ->
+            case proplists:get_value(destination, Args) of
+                undefined ->
+                    rebar_api:error("Missing required parameter: --destination <path/to/output.yml>", []),
+                    {error, missing_destination_parameter};
+                Destination ->
+                    validate_destination_path(Destination)
+            end
+    end.
+
+-doc """
+-------------------------------------------------------------------------------------------
+Validates the destination path and its file extension.
+-------------------------------------------------------------------------------------------
+""".
+-spec validate_destination_path(string()) -> ok | {error, atom()}.
+validate_destination_path(Destination) ->
+    % Check file extension
+    Extension = filename:extension(Destination),
+    ValidExtensions = [".yml", ".yaml", ".json"],
+
+    case lists:member(Extension, ValidExtensions) of
+        false ->
+            rebar_api:error(
+                "Invalid file extension for --destination: ~s (expected .yml, .yaml, or .json)",
+                [Extension]
+            ),
+            {error, invalid_destination_extension};
+        true ->
+            % Check if parent directory exists or can be created
+            ParentDir = filename:dirname(Destination),
+            case filelib:is_dir(ParentDir) of
+                true ->
+                    ok;
+                false ->
+                    % Try to create parent directory
+                    case filelib:ensure_dir(Destination) of
+                        ok ->
+                            ok;
+                        {error, Reason} ->
+                            rebar_api:error(
+                                "Cannot create parent directory for --destination: ~s (reason: ~p)",
+                                [ParentDir, Reason]
+                            ),
+                            {error, destination_dir_creation_failed}
+                    end
+            end
     end.
 
 -doc """
@@ -54,15 +115,23 @@ do(State) ->
 Executes the OpenAPI spec generation workflow.
 -------------------------------------------------------------------------------------------
 """.
--spec execute_generation(rebar_state:t(), atom(), proplists:proplist()) ->
+-spec execute_generation(rebar_state:t(), atom(), string(), proplists:proplist()) ->
     {ok, rebar_state:t()} | {error, term()}.
-execute_generation(State, AppName, Args) ->
-    OutputDir = proplists:get_value(output, Args, "./docs/openapi/"),
-    Format = proplists:get_value(format, Args, "yaml"),
+execute_generation(State, AppName, Destination, Args) ->
     GenCoverage = proplists:get_value(coverage, Args, true),
     Validate = proplists:get_value(validate, Args, false),
 
+    % Determine format from file extension
+    Extension = filename:extension(Destination),
+    Format = case Extension of
+        ".json" -> "json";
+        ".yml" -> "yaml";
+        ".yaml" -> "yaml";
+        _ -> "yaml"  % Default fallback
+    end,
+
     rebar_api:info("Generating OpenAPI spec for app: ~p", [AppName]),
+    rebar_api:info("Output destination: ~s", [Destination]),
 
     try
         % 1. Discover handlers
@@ -79,14 +148,13 @@ execute_generation(State, AppName, Args) ->
                 Options = #{
                     app_name => AppName,
                     format => Format,
-                    output_dir => OutputDir
+                    output_dir => filename:dirname(Destination)
                 },
 
                 Spec = openapi_spec_builder:build_spec(AppName, Handlers, Options),
 
                 % 3. Write to file
-                OutputFile = filename:join(OutputDir, atom_to_list(AppName) ++ "." ++ Format),
-                ok = filelib:ensure_dir(OutputFile),
+                ok = filelib:ensure_dir(Destination),
 
                 Content =
                     case Format of
@@ -98,12 +166,13 @@ execute_generation(State, AppName, Args) ->
                             jsx:prettify(jsx:encode(Spec))
                     end,
 
-                ok = file:write_file(OutputFile, Content),
-                rebar_api:info("✓ Generated: ~s", [OutputFile]),
+                ok = file:write_file(Destination, Content),
+                rebar_api:info("✓ Generated: ~s", [Destination]),
 
-                % 4. Coverage report
+                % 4. Coverage report (place in same directory as destination)
                 case GenCoverage of
                     true ->
+                        OutputDir = filename:dirname(Destination),
                         generate_coverage_report(AppName, Handlers, OutputDir);
                     false ->
                         ok
@@ -112,7 +181,7 @@ execute_generation(State, AppName, Args) ->
                 % 5. Validate
                 case Validate of
                     true ->
-                        validate_generated_spec(OutputFile);
+                        validate_generated_spec(Destination);
                     false ->
                         ok
                 end,
@@ -247,7 +316,13 @@ Formats error messages for rebar3.
 """.
 -spec format_error(term()) -> iolist().
 format_error(missing_app_parameter) ->
-    "Missing required --app parameter. Usage: rebar3 openapi generate --app <app_name>";
+    "Missing required parameter: --app <app_name>. Usage: rebar3 openapi generate --app <app_name> --destination <path/to/output.yml>";
+format_error(missing_destination_parameter) ->
+    "Missing required parameter: --destination <path/to/output.yml>. Usage: rebar3 openapi generate --app <app_name> --destination <path/to/output.yml>";
+format_error(invalid_destination_extension) ->
+    "Invalid file extension for --destination. Expected .yml, .yaml, or .json";
+format_error(destination_dir_creation_failed) ->
+    "Failed to create parent directory for --destination path";
 format_error({generation_failed, Reason}) ->
     io_lib:format("OpenAPI generation failed: ~p", [Reason]);
 format_error(Reason) ->

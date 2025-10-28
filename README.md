@@ -47,37 +47,41 @@ Generate an OpenAPI specification from your Erlang handlers:
 # First, compile your application
 rebar3 compile
 
-# Then generate the OpenAPI spec
+# Then generate the OpenAPI spec with destination path
 # This automatically discovers ALL handlers that export trails/0
-rebar3 openapi generate --app my_app
+rebar3 openapi generate --app my_app --destination ./docs/api.yml
 ```
 
 > **Note:** The `--app` parameter specifies which application to scan. The plugin will automatically discover all modules in that application that export `trails/0`. You don't need to specify individual handlers.
 
 #### Generate Command Options
 
-| Option       | Short | Type    | Default           | Description                      |
-| ------------ | ----- | ------- | ----------------- | -------------------------------- |
-| `--app`      | `-a`  | atom    | *required*        | Target application name          |
-| `--output`   | `-o`  | string  | `./docs/openapi/` | Output directory                 |
-| `--format`   | `-f`  | string  | `yaml`            | Output format (`yaml` or `json`) |
-| `--coverage` | `-c`  | boolean | `true`            | Generate coverage report         |
-| `--validate` | `-v`  | boolean | `false`           | Validate generated spec          |
+| Option          | Short | Type    | Default    | Description                               |
+| --------------- | ----- | ------- | ---------- | ----------------------------------------- |
+| `--app`         | `-a`  | atom    | *required* | Target application name                   |
+| `--destination` | `-d`  | string  | *required* | Output file path (e.g., `./docs/api.yml`) |
+| `--coverage`    | `-c`  | boolean | `true`     | Generate coverage report                  |
+| `--validate`    | `-v`  | boolean | `false`    | Validate generated spec                   |
+
+> **Note:** The output format (YAML or JSON) is automatically determined by the file extension in `--destination` (`.yml`, `.yaml` for YAML, `.json` for JSON).
 
 #### Generate Examples
 
 ```bash
 # Generate YAML spec with coverage report
-rebar3 openapi generate --app myapp
+rebar3 openapi generate --app myapp --destination ./docs/myapp.yml
 
-# Generate JSON spec without coverage report
-rebar3 openapi generate --app myapp --format json --coverage false
+# Generate JSON spec
+rebar3 openapi generate --app myapp --destination ./docs/myapp.json
+
+# Generate without coverage report
+rebar3 openapi generate --app myapp --destination ./api.yml --coverage false
 
 # Generate with validation
-rebar3 openapi generate --app myapp --validate true
+rebar3 openapi generate --app myapp --destination ./api.yml --validate true
 
-# Custom output directory
-rebar3 openapi generate --app myapp --output ./api-docs/
+# Use absolute path
+rebar3 openapi generate --app myapp --destination /absolute/path/to/api.yaml
 ```
 
 ### Import: OpenAPI → Erlang
@@ -86,60 +90,68 @@ Generate Erlang trails definitions from an existing OpenAPI specification:
 
 ```bash
 # Import OpenAPI spec and generate Erlang modules
-rebar3 openapi import --spec api-spec.yaml --output src/
-
-# Customize module names
-rebar3 openapi import --spec api-spec.yaml \
-    --handler-module my_api_handler \
-    --metadata-module my_api_metadata \
-    --handler-name my_http_handler
-
-# Overwrite existing files
-rebar3 openapi import --spec api-spec.yaml --overwrite
+rebar3 openapi import \
+    --spec api-spec.yaml \
+    --handler-path ./src/my_handler.erl \
+    --metadata-path ./src/my_metadata.erl
 ```
+
+> **Note:** Module names are automatically extracted from the file paths. For example, `./src/my_handler.erl` will create a module named `my_handler`.
 
 #### Import Command Options
 
-| Option              | Short | Type    | Default              | Description                                |
-| ------------------- | ----- | ------- | -------------------- | ------------------------------------------ |
-| `--spec`            | `-s`  | string  | *required*           | Path to OpenAPI YAML specification file    |
-| `--output`          | `-o`  | string  | `src/`               | Output directory for generated files       |
-| `--handler-module`  | `-h`  | string  | `generated_handler`  | Name for generated trails handler module   |
-| `--metadata-module` | `-m`  | string  | `generated_metadata` | Name for generated metadata module         |
-| `--handler-name`    |       | string  | `handler_module`     | Handler to use in trails (e.g. my_handler) |
-| `--overwrite`       | `-w`  | boolean | `false`              | Overwrite existing files                   |
-| `--format`          | `-f`  | boolean | `true`               | Format generated code                      |
+| Option            | Short | Type    | Default          | Description                                                     |
+| ----------------- | ----- | ------- | ---------------- | --------------------------------------------------------------- |
+| `--spec`          | `-s`  | string  | *required*       | Path to OpenAPI YAML specification file                         |
+| `--handler-path`  | `-h`  | string  | *required*       | Output path for handler module (e.g., `./src/my_handler.erl`)   |
+| `--metadata-path` | `-m`  | string  | *required*       | Output path for metadata module (e.g., `./src/my_metadata.erl`) |
+| `--handler-name`  |       | string  | `handler_module` | Handler to use in trails (e.g., `my_http_handler`)              |
+| `--overwrite`     | `-w`  | boolean | `false`          | Overwrite existing files                                        |
+| `--format`        | `-f`  | boolean | `true`           | Format generated code                                           |
 
 #### Import Examples
 
 ```bash
-# Basic import
-rebar3 openapi import --spec openapi.yaml
+# Basic import with explicit paths
+rebar3 openapi import \
+    --spec openapi.yaml \
+    --handler-path ./src/api_handler.erl \
+    --metadata-path ./src/api_metadata.erl
 
-# Full customization
+# Full customization with custom handler name
 rebar3 openapi import \
     --spec ./docs/api-spec.yaml \
-    --output src/api/ \
-    --handler-module user_api_trails \
-    --metadata-module user_api_metadata \
+    --handler-path ./src/user_api_handler.erl \
+    --metadata-path ./src/user_api_metadata.erl \
     --handler-name user_http_handler \
     --overwrite
 
+# Import with absolute paths
+rebar3 openapi import \
+    --spec /absolute/path/to/api.yaml \
+    --handler-path /absolute/path/to/handler.erl \
+    --metadata-path /absolute/path/to/metadata.erl
+
 # Import and skip formatting
-rebar3 openapi import --spec api.yaml --format false
+rebar3 openapi import \
+    --spec api.yaml \
+    --handler-path ./src/handler.erl \
+    --metadata-path ./src/metadata.erl \
+    --format false
 ```
 
 #### What Gets Generated
 
-When you run `rebar3 openapi import`, it creates two files:
+When you run `rebar3 openapi import`, it creates two files at the specified paths:
 
-1. **Metadata Module** (`*_metadata.erl`):
+1. **Metadata Module** (at `--metadata-path`):
    - Contains metadata functions for each API endpoint
    - One function per operation (e.g., `get_users/0`, `post_user/0`)
    - Includes full OpenAPI metadata: tags, parameters, schemas, responses
+   - Module name is automatically derived from the filename
    - Follows cowboy_swagger format
 
-2. **Handler Module** (`*_handler.erl`):
+2. **Trails Handler Module** (at `--handler-path`):
    - Implements `trails_handler` behaviour
    - Exports `trails/0` function
    - Calls metadata functions from the metadata module
@@ -983,24 +995,22 @@ The repository includes `test_import.escript`, a standalone script to test the O
 ### Usage
 
 ```bash
-# Basic usage
-./test_import.escript your_openapi_spec.yaml
+# Basic usage - provide OpenAPI spec and source handler file
+./test_import.escript your_openapi_spec.yaml your_handler.erl
 
-# With custom options
-./test_import.escript your_spec.yaml \
-  --output test_output/ \
-  --handler-module my_handler \
-  --metadata-module my_metadata
+# The script will generate output files in test_output/ directory:
+# - test_output/<handler_module>.erl (handler with trails)
+# - test_output/<handler_module>_metadata.erl (metadata functions)
 ```
 
-### Options
+### Arguments
 
-| Option              | Description                                      | Default              |
-| ------------------- | ------------------------------------------------ | -------------------- |
-| `--output`          | Output directory for generated files             | `src/`               |
-| `--handler-module`  | Name for generated trails handler module         | `generated_handler`  |
-| `--metadata-module` | Name for generated metadata module               | `generated_metadata` |
-| `--handler-name`    | Handler to use in trails (e.g., my_http_handler) | `handler_module`     |
+| Argument | Description                                   | Required |
+| -------- | --------------------------------------------- | -------- |
+| arg1     | Path to OpenAPI YAML specification file       | Yes      |
+| arg2     | Path to existing handler file (for reference) | Yes      |
+
+> **Note:** The script automatically generates output paths in the `test_output/` directory based on the handler module name.
 
 ### Example
 
@@ -1027,7 +1037,7 @@ paths:
 EOF
 
 # Run the test script
-./test_import.escript test_api.yaml --output test_output/
+./test_import.escript test_api.yaml ./test_output/handler.erl
 
 # Check generated files
 ls test_output/

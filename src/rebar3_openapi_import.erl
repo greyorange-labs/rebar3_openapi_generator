@@ -20,16 +20,15 @@ init(State) ->
         {module, ?MODULE},
         {bare, true},
         {deps, ?DEPS},
-        {example, "rebar3 openapi import --spec openapi.yaml --output src/"},
+        {example, "rebar3 openapi import --spec openapi.yaml --handler-path ./src/my_handler.erl --metadata-path ./src/my_metadata.erl"},
         {short_desc, "Import OpenAPI spec and generate Erlang trails definitions"},
         {desc,
             "Import an OpenAPI YAML specification and generate Erlang handler modules "
             "with trails definitions and metadata functions."},
         {opts, [
             {spec, $s, "spec", string, "Path to OpenAPI YAML specification file (required)"},
-            {output, $o, "output", {string, "src/"}, "Output directory for generated files"},
-            {handler_module, $h, "handler-module", {string, "generated_handler"}, "Name for generated handler module"},
-            {metadata_module, $m, "metadata-module", {string, "generated_metadata"}, "Name for generated metadata module"},
+            {handler_path, $h, "handler-path", string, "Output path for handler module, e.g. ./src/my_handler.erl (required)"},
+            {metadata_path, $m, "metadata-path", string, "Output path for metadata module, e.g. ./src/my_metadata.erl (required)"},
             {handler_name, undefined, "handler-name", {string, "handler_module"},
                 "Handler module name to use in trails (e.g. my_http_handler)"},
             {overwrite, $w, "overwrite", {boolean, false}, "Overwrite existing files"},
@@ -44,30 +43,111 @@ do(State) ->
     {Opts, _} = rebar_state:command_parsed_args(State),
 
     % Validate required options
+    case validate_required_params(Opts) of
+        ok ->
+            SpecFile = proplists:get_value(spec, Opts),
+            HandlerPath = proplists:get_value(handler_path, Opts),
+            MetadataPath = proplists:get_value(metadata_path, Opts),
+            execute_import(SpecFile, HandlerPath, MetadataPath, Opts, State);
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% Validate required parameters
+-spec validate_required_params(proplists:proplist()) -> ok | {error, string()}.
+validate_required_params(Opts) ->
     case proplists:get_value(spec, Opts) of
         undefined ->
-            {error, "Missing required option: --spec <openapi.yaml>"};
+            rebar_api:error("Missing required parameter: --spec <path/to/openapi.yaml>", []),
+            {error, "Missing required parameter: --spec <path/to/openapi.yaml>"};
         SpecFile ->
-            execute_import(SpecFile, Opts, State)
+            case filelib:is_file(SpecFile) of
+                false ->
+                    rebar_api:error("OpenAPI spec file not found: ~s", [SpecFile]),
+                    {error, io_lib:format("OpenAPI spec file not found: ~s", [SpecFile])};
+                true ->
+                    validate_output_paths(Opts)
+            end
+    end.
+
+%% Validate output paths
+-spec validate_output_paths(proplists:proplist()) -> ok | {error, string()}.
+validate_output_paths(Opts) ->
+    case proplists:get_value(handler_path, Opts) of
+        undefined ->
+            rebar_api:error("Missing required parameter: --handler-path <path/to/handler.erl>", []),
+            {error, "Missing required parameter: --handler-path <path/to/handler.erl>"};
+        HandlerPath ->
+            case proplists:get_value(metadata_path, Opts) of
+                undefined ->
+                    rebar_api:error("Missing required parameter: --metadata-path <path/to/metadata.erl>", []),
+                    {error, "Missing required parameter: --metadata-path <path/to/metadata.erl>"};
+                MetadataPath ->
+                    case validate_erlang_file_path(HandlerPath, "handler-path") of
+                        ok ->
+                            validate_erlang_file_path(MetadataPath, "metadata-path");
+                        Error ->
+                            Error
+                    end
+            end
+    end.
+
+%% Validate Erlang file path
+-spec validate_erlang_file_path(string(), string()) -> ok | {error, string()}.
+validate_erlang_file_path(Path, ParamName) ->
+    % Check file extension
+    case filename:extension(Path) of
+        ".erl" ->
+            % Check if parent directory exists or can be created
+            ParentDir = filename:dirname(Path),
+            case filelib:is_dir(ParentDir) of
+                true ->
+                    ok;
+                false ->
+                    case filelib:ensure_dir(Path) of
+                        ok ->
+                            ok;
+                        {error, Reason} ->
+                            ErrMsg = io_lib:format(
+                                "Cannot create parent directory for --~s: ~s (reason: ~p)",
+                                [ParamName, ParentDir, Reason]
+                            ),
+                            rebar_api:error("~s", [ErrMsg]),
+                            {error, lists:flatten(ErrMsg)}
+                    end
+            end;
+        Other ->
+            ErrMsg = io_lib:format(
+                "Invalid file extension for --~s: ~s (expected .erl)",
+                [ParamName, Other]
+            ),
+            rebar_api:error("~s", [ErrMsg]),
+            {error, lists:flatten(ErrMsg)}
     end.
 
 %% Execute the import process
-execute_import(SpecFile, Opts, State) ->
+execute_import(SpecFile, HandlerPath, MetadataPath, Opts, State) ->
     rebar_api:info("Importing OpenAPI specification from: ~s", [SpecFile]),
+
+    % Extract module names from file paths
+    HandlerModule = list_to_atom(filename:basename(HandlerPath, ".erl")),
+    MetadataModule = list_to_atom(filename:basename(MetadataPath, ".erl")),
+
+    rebar_api:info("Handler module: ~s (from ~s)", [HandlerModule, HandlerPath]),
+    rebar_api:info("Metadata module: ~s (from ~s)", [MetadataModule, MetadataPath]),
 
     % Parse OpenAPI spec
     case openapi_importer:parse_openapi_file(SpecFile) of
         {ok, ParsedSpec} ->
-            generate_files(ParsedSpec, Opts, State);
+            generate_files(ParsedSpec, HandlerPath, MetadataPath, HandlerModule, MetadataModule, Opts, State);
         {error, Reason} ->
             rebar_api:error("Parse error details: ~p", [Reason]),
             {error, format_parse_error(Reason)}
         %% Generate Erlang files from parsed spec
     end.
-generate_files(ParsedSpec, Opts, State) ->
-    OutputDir = proplists:get_value(output, Opts),
-    HandlerModule = list_to_atom(proplists:get_value(handler_module, Opts)),
-    MetadataModule = list_to_atom(proplists:get_value(metadata_module, Opts)),
+
+%% Generate files from parsed spec
+generate_files(ParsedSpec, HandlerPath, MetadataPath, HandlerModule, MetadataModule, Opts, State) ->
     HandlerName = proplists:get_value(handler_name, Opts),
     Overwrite = proplists:get_value(overwrite, Opts),
     DoFormat = proplists:get_value(format, Opts),
@@ -81,24 +161,23 @@ generate_files(ParsedSpec, Opts, State) ->
         maps:get(<<"version">>, Info, <<"1.0.0">>)
     ]),
 
-    % Ensure output directory exists
-    filelib:ensure_dir(filename:join(OutputDir, "dummy")),
+    % Ensure output directories exist
+    filelib:ensure_dir(HandlerPath),
+    filelib:ensure_dir(MetadataPath),
 
     % Generate metadata module
-    MetadataFile = filename:join(OutputDir, atom_to_list(MetadataModule) ++ ".erl"),
-    case generate_metadata_file(MetadataFile, MetadataModule, Paths, Overwrite) of
+    case generate_metadata_file(MetadataPath, MetadataModule, Paths, Overwrite) of
         ok ->
-            rebar_api:info("Generated metadata module: ~s", [MetadataFile]),
+            rebar_api:info("Generated metadata module: ~s", [MetadataPath]),
 
             % Generate handler module
-            HandlerFile = filename:join(OutputDir, atom_to_list(HandlerModule) ++ ".erl"),
-            case generate_handler_file(HandlerFile, HandlerModule, MetadataModule, HandlerName, Paths, Overwrite) of
+            case generate_handler_file(HandlerPath, HandlerModule, MetadataModule, HandlerName, Paths, Overwrite) of
                 ok ->
-                    rebar_api:info("Generated handler module: ~s", [HandlerFile]),
+                    rebar_api:info("Generated handler module: ~s", [HandlerPath]),
 
                     % Format generated files if requested
                     case DoFormat of
-                        true -> format_files([MetadataFile, HandlerFile]);
+                        true -> format_files([MetadataPath, HandlerPath]);
                         false -> ok
                     end,
 

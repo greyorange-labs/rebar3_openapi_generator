@@ -172,6 +172,7 @@ main([HandlerModuleStr]) ->
                         io:format("Step 4: Writing YAML Output~n"),
                         io:format("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━~n"),
 
+                        % Use new destination-style path
                         OutputFile = "test_output/generated_openapi.yml",
                         filelib:ensure_dir(OutputFile),
                         YamlContent = yaml_encoder:encode(Spec),
@@ -208,7 +209,9 @@ main([HandlerModuleStr]) ->
                                 io:format("  • Routes found: ~p~n", [length(Routes)]),
                                 io:format("  • Coverage: ~.1f%~n", [CoveragePercent]),
                                 io:format("  • OpenAPI spec generated: ✓~n"),
-                                io:format("  • YAML output: ~s~n", [OutputFile]),
+                                io:format("  • Output destination: ~s~n", [OutputFile]),
+                                io:format("~nNote: To use with rebar3 plugin, use:~n"),
+                                io:format("  rebar3 openapi generate --app ~s --destination ~s~n", [HandlerModule, OutputFile]),
                                 io:format("~n"),
                                 halt(0);
                             {error, WriteErr} ->

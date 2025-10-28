@@ -11,20 +11,32 @@
 -mode(compile).
 
 main([]) ->
-    io:format("Usage: ~s <openapi_spec> <handler_file> <metadata_module>~n", [escript:script_name()]),
-    io:format("Example: ~s api.yml handler.erl handler_metadata~n", [escript:script_name()]),
+    io:format("Usage: ~s <openapi_spec> <handler_file>~n", [escript:script_name()]),
+    io:format("Example: ~s api.yml handler.erl~n", [escript:script_name()]),
+    io:format("~nNote: Handler and metadata paths will be generated in test_output/~n"),
     halt(1);
 
-main([OpenApiFile, HandlerFile, MetadataModuleName]) ->
+main([OpenApiFile, HandlerFile]) ->
     io:format("~n╔════════════════════════════════════════════════════════════════╗~n"),
     io:format("║     OpenAPI Handler Update Test                                ║~n"),
     io:format("╚════════════════════════════════════════════════════════════════╝~n~n"),
 
+    % Extract handler module name and generate output paths
+    HandlerModuleName = extract_module_name_from_file(HandlerFile),
+    MetadataModuleName = HandlerModuleName ++ "_metadata",
+
+    % Define output paths
+    TestDir = "test_output",
+    HandlerOutputPath = TestDir ++ "/" ++ HandlerModuleName ++ ".erl",
+    MetadataOutputPath = TestDir ++ "/" ++ MetadataModuleName ++ ".erl",
+
     io:format("Configuration:~n"),
     io:format("  • OpenAPI Spec: ~s~n", [OpenApiFile]),
-    io:format("  • Handler File: ~s~n", [HandlerFile]),
-    io:format("  • Metadata Module: ~s~n", [MetadataModuleName]),
-    io:format("  • Output Directory: test_output/~n~n"),
+    io:format("  • Source Handler: ~s~n", [HandlerFile]),
+    io:format("  • Handler Module: ~s~n", [HandlerModuleName]),
+    io:format("  • Output Handler Path: ~s~n", [HandlerOutputPath]),
+    io:format("  • Output Metadata Path: ~s~n", [MetadataOutputPath]),
+    io:format("~n"),
 
     % Ensure yamerl is started
     application:ensure_all_started(yamerl),
@@ -137,14 +149,13 @@ main([OpenApiFile, HandlerFile, MetadataModuleName]) ->
                     io:format("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━~n"),
 
                     MetadataModule = list_to_atom(MetadataModuleName),
-                    MetadataFile = TestDir ++ "/" ++ MetadataModuleName ++ ".erl",
 
-                    case generate_metadata(MetadataFile, MetadataModule, Paths) of
+                    case generate_metadata(MetadataOutputPath, MetadataModule, Paths) of
                         ok ->
-                            io:format("✓ Generated metadata module: ~s~n", [MetadataFile]),
+                            io:format("✓ Generated metadata module: ~s~n", [MetadataOutputPath]),
 
                             % Show preview
-                            {ok, MetaContent} = file:read_file(MetadataFile),
+                            {ok, MetaContent} = file:read_file(MetadataOutputPath),
                             Lines = binary:split(MetaContent, <<"\n">>, [global]),
                             PreviewLines = lists:sublist([binary_to_list(L) || L <- Lines], 30),
                             io:format("~nPreview (first 30 lines):~n"),
@@ -169,11 +180,10 @@ main([OpenApiFile, HandlerFile, MetadataModuleName]) ->
                     io:format("Step 5: Updating Handler Module~n"),
                     io:format("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━~n"),
 
-                    UpdatedHandlerFile = TestDir ++ "/" ++ HandlerModuleName ++ ".erl",
-                    case update_handler(UpdatedHandlerFile, HandlerContent, PathsToAdd,
+                    case update_handler(HandlerOutputPath, HandlerContent, PathsToAdd,
                                        PathsToUpdate, MetadataModule) of
                         {ok, Changes} ->
-                            io:format("✓ Updated handler module: ~s~n", [UpdatedHandlerFile]),
+                            io:format("✓ Updated handler module: ~s~n", [HandlerOutputPath]),
                             io:format("~nChanges made:~n"),
                             lists:foreach(fun(Change) ->
                                 io:format("  • ~s~n", [Change])
@@ -189,15 +199,20 @@ main([OpenApiFile, HandlerFile, MetadataModuleName]) ->
                     io:format("✓ Test Complete - Summary~n"),
                     io:format("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━~n"),
                     io:format("~nGenerated Files:~n"),
-                    io:format("  1. ~s~n", [MetadataFile]),
+                    io:format("  1. ~s~n", [MetadataOutputPath]),
                     io:format("     └─ Contains OpenAPI metadata for ~p path(s)~n", [length(Paths)]),
-                    io:format("  2. ~s~n", [UpdatedHandlerFile]),
+                    io:format("  2. ~s~n", [HandlerOutputPath]),
                     io:format("     └─ Updated trails() with ~p new entries~n", [length(PathsToAdd)]),
                     io:format("~n"),
                     io:format("Actions:~n"),
                     io:format("  • Added ~p new trail definition(s)~n", [length(PathsToAdd)]),
                     io:format("  • Generated/Updated ~p metadata function(s)~n", [length(Paths)]),
                     io:format("  • Preserved all existing handler code~n"),
+                    io:format("~n"),
+                    io:format("To use with rebar3 plugin, run:~n"),
+                    io:format("  rebar3 openapi import --spec ~s \\~n", [OpenApiFile]),
+                    io:format("    --handler-path ~s \\~n", [HandlerOutputPath]),
+                    io:format("    --metadata-path ~s~n", [MetadataOutputPath]),
                     io:format("~n"),
                     io:format("Next Steps:~n"),
                     io:format("  1. Review generated files in ~s/~n", [TestDir]),
@@ -219,6 +234,10 @@ main([OpenApiFile, HandlerFile, MetadataModuleName]) ->
 %%% ═══════════════════════════════════════════════════════════════════
 %%% Internal Helper Functions
 %%% ═══════════════════════════════════════════════════════════════════
+
+%% Extract module name from file path
+extract_module_name_from_file(FilePath) ->
+    filename:basename(FilePath, ".erl").
 
 %% Extract module name from handler content
 extract_module_name(Content) ->
