@@ -259,7 +259,7 @@ format_report(Report) ->
     end,
 
     Header = "\n================================================================\n",
-    Title = io_lib:format("~s OpenAPI Coverage Report: ~p\n", [Icon, AppName]),
+    Title = io_lib:format("~s OpenAPI Coverage Report: ~s\n", [Icon, atom_to_list(AppName)]),
     Separator = "================================================================\n\n",
     SummaryLine = io_lib:format("[*] ~s\n\n", [Summary]),
 
