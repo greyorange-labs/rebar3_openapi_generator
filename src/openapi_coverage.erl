@@ -245,7 +245,7 @@ format_summary(Coverage, Complete, Total) ->
         )
     ).
 
--spec format_report(coverage_report()) -> binary().
+-spec format_report(coverage_report()) -> iolist().
 format_report(Report) ->
     AppName = maps:get(app_name, Report),
     Summary = maps:get(summary, Report),
@@ -270,7 +270,7 @@ format_report(Report) ->
 
     Footer = "\n================================================================\n",
 
-    iolist_to_binary([Header, Title, Separator, SummaryLine, HandlerLines, Footer]).
+    [Header, Title, Separator, SummaryLine, HandlerLines, Footer].
 
 -spec format_handler(handler_coverage()) -> iolist().
 format_handler(HC) ->
