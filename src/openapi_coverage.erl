@@ -125,17 +125,24 @@ analyze_handler(Module) ->
 -spec analyze_route_method(binary(), binary(), map()) ->
     {complete, route_status()} | {incomplete, route_status()} | {undocumented, route_status()}.
 analyze_route_method(Path, Method, PathsMap) ->
+    io:format("[DEBUG] Analyzing ~s [~s]~n", [Path, Method]),
+    io:format("[DEBUG] PathsMap keys: ~p~n", [maps:keys(PathsMap)]),
     case maps:get(Path, PathsMap, undefined) of
         undefined ->
+            io:format("[DEBUG] No metadata found for path: ~s~n", [Path]),
             % No metadata at all
             {undocumented, #{path => Path, method => Method}};
         MethodsMap ->
+            io:format("[DEBUG] Found metadata for path, MethodsMap: ~p~n", [MethodsMap]),
             MethodLower = list_to_binary(string:lowercase(binary_to_list(Method))),
+            io:format("[DEBUG] Looking for method: ~s~n", [MethodLower]),
             case maps:get(MethodLower, MethodsMap, undefined) of
                 undefined ->
+                    io:format("[DEBUG] Method ~s not found in metadata~n", [MethodLower]),
                     % Path has metadata but not this method
                     {undocumented, #{path => Path, method => Method}};
                 OpSpec ->
+                    io:format("[DEBUG] Found OpSpec: ~p~n", [OpSpec]),
                     % Check completeness
                     Issues = check_completeness(OpSpec, Method),
                     case Issues of
