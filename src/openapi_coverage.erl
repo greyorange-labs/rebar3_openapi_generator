@@ -290,7 +290,7 @@ format_handler(HC) ->
 
     CompleteLines = case Complete of
         [] -> [];
-        _ -> [io_lib:format("  ✓ Complete (~s routes):\n", [integer_to_list(length(Complete))])
+        _ -> [io_lib:format("  + Complete (~s routes):\n", [integer_to_list(length(Complete))])
               | lists:map(fun(R) ->
                     io_lib:format("     ~s [~s]\n", [
                         maps:get(path, R),
@@ -305,7 +305,7 @@ format_handler(HC) ->
 
     IncompleteLines = case Incomplete of
         [] -> [];
-        _ -> [io_lib:format("  ⚠ Incomplete (~s routes):\n", [integer_to_list(length(Incomplete))])
+        _ -> [io_lib:format("  ! Incomplete (~s routes):\n", [integer_to_list(length(Incomplete))])
               | lists:map(fun(R) ->
                     Issues = maps:get(issues, R),
                     IssuesStr = iolist_to_binary(lists:join(", ", Issues)),
@@ -323,7 +323,7 @@ format_handler(HC) ->
 
     UndocumentedLines = case Undocumented of
         [] -> [];
-        _ -> [io_lib:format("  ✗ Undocumented (~s routes):\n", [integer_to_list(length(Undocumented))])
+        _ -> [io_lib:format("  X Undocumented (~s routes):\n", [integer_to_list(length(Undocumented))])
               | lists:map(fun(R) ->
                     io_lib:format("     ~s [~s]\n", [
                         maps:get(path, R),
