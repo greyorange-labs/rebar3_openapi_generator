@@ -359,28 +359,17 @@ merge_metadata_file(FilePath, ModuleName, NewPaths) ->
 merge_handler_file(FilePath, _HandlerModule, MetadataModule, HandlerName, NewPaths) ->
     case file:read_file(FilePath) of
         {ok, ExistingContent} ->
-            % Extract existing trail paths
-            ExistingPaths = extract_trail_paths(ExistingContent),
-
-            % Find paths to add
-            PathsToAdd = lists:filter(
-                fun(PathData) ->
-                    Path = maps:get(path, PathData),
-                    CowboyPath = normalize_path_for_cowboy(binary_to_list(Path)),
-                    not lists:member(CowboyPath, ExistingPaths)
-                end,
-                NewPaths
-            ),
-
-            case PathsToAdd of
+            % Don't filter out existing paths - let add_trails_to_module handle them
+            % It will automatically replace existing trails or add new ones
+            case NewPaths of
                 [] ->
-                    rebar_api:info("No new paths to add to handler", []),
+                    rebar_api:info("No paths to process", []),
                     ok;
                 _ ->
-                    rebar_api:info("Adding ~p new path(s) to handler", [length(PathsToAdd)]),
+                    rebar_api:info("Processing ~p path(s) (adding new or updating existing)", [length(NewPaths)]),
                     UpdatedContent = add_trails_to_module(
                         ExistingContent,
-                        PathsToAdd,
+                        NewPaths,
                         MetadataModule,
                         HandlerName
                     ),
@@ -499,16 +488,6 @@ reconstruct_paths_from_functions(FunctionMap, FunctionNames) ->
         Grouped
     ).
 
-%% Extract trail paths from handler module
-extract_trail_paths(Content) ->
-    Pattern = "trails:trail\\(\"([^\"]+)\"",
-    case re:run(Content, Pattern, [global, {capture, all_but_first, list}]) of
-        {match, Matches} ->
-            [Path || [Path] <- Matches];
-        nomatch ->
-            []
-    end.
-
 %% Normalize OpenAPI path to Cowboy format
 normalize_path_for_cowboy(Path) ->
     re:replace(Path, "\\{([^}]+)\\}", ":\\1", [global, {return, list}]).
@@ -550,18 +529,23 @@ add_trails_to_module(ExistingContent, PathsToAdd, MetadataModule, HandlerName) -
 %% Try to automatically insert or replace trails in the trails/0 function
 try_auto_insert_trails(ContentStr, NewTrailsMap, HandlerName, MetadataModule) ->
     % Find the trails/0 function body
-    case re:run(ContentStr, "^trails\\(\\)\\s*->\\s*\\n(.+?)^[a-z_]", 
-                [multiline, dotall, {capture, all, index}]) of
+    case
+        re:run(
+            ContentStr,
+            "^trails\\(\\)\\s*->\\s*\\n(.+?)^[a-z_]",
+            [multiline, dotall, {capture, all, index}]
+        )
+    of
         {match, [_FullMatch, {BodyStart, BodyLen}]} ->
             % Extract the function body
             FunctionBody = string:substr(ContentStr, BodyStart + 1, BodyLen),
-            
+
             % Parse existing trails
             ExistingTrails = parse_trails_from_body(FunctionBody),
-            
+
             % Determine what to add/replace
             {ToAdd, ToReplace} = categorize_trails(NewTrailsMap, ExistingTrails),
-            
+
             case {map_size(ToAdd), map_size(ToReplace)} of
                 {0, 0} ->
                     {error, no_changes_needed};
@@ -570,7 +554,7 @@ try_auto_insert_trails(ContentStr, NewTrailsMap, HandlerName, MetadataModule) ->
                     UpdatedBody = apply_trail_modifications(
                         FunctionBody, ToAdd, ToReplace, HandlerName, MetadataModule
                     ),
-                    
+
                     % Reconstruct the file
                     Before = string:substr(ContentStr, 1, BodyStart),
                     After = string:substr(ContentStr, BodyStart + BodyLen + 1),
@@ -588,17 +572,19 @@ parse_trails_from_body(Body) ->
     % 2. {"/path", handler, []}
     TrailPattern = "trails:trail\\(\"([^\"]+)\"[^)]+\\)",
     TuplePattern = "\\{\"([^\"]+)\"",
-    
-    TrailPaths = case re:run(Body, TrailPattern, [global, {capture, all_but_first, list}]) of
-        {match, Matches1} -> [Path || [Path] <- Matches1];
-        nomatch -> []
-    end,
-    
-    TuplePaths = case re:run(Body, TuplePattern, [global, {capture, all_but_first, list}]) of
-        {match, Matches2} -> [Path || [Path] <- Matches2];
-        nomatch -> []
-    end,
-    
+
+    TrailPaths =
+        case re:run(Body, TrailPattern, [global, {capture, all_but_first, list}]) of
+            {match, Matches1} -> [Path || [Path] <- Matches1];
+            nomatch -> []
+        end,
+
+    TuplePaths =
+        case re:run(Body, TuplePattern, [global, {capture, all_but_first, list}]) of
+            {match, Matches2} -> [Path || [Path] <- Matches2];
+            nomatch -> []
+        end,
+
     sets:from_list(TrailPaths ++ TuplePaths, [{version, 2}]).
 
 %% Categorize trails into those to add vs replace
@@ -622,14 +608,14 @@ apply_trail_modifications(Body, ToAdd, ToReplace, HandlerName, MetadataModule) -
             % Match both old formats and replace with new trail format
             Pattern1 = io_lib:format("trails:trail\\(\"~s\"[^)]+\\)", [re:replace(Path, ":", "\\\\:", [global, {return, list}])]),
             Pattern2 = io_lib:format("\\{\"~s\"[^}]+\\}", [re:replace(Path, ":", "\\\\:", [global, {return, list}])]),
-            
+
             Temp = re:replace(BodyAcc, Pattern1, NewTrailCode, [{return, list}, global]),
             re:replace(Temp, Pattern2, NewTrailCode, [{return, list}, global])
         end,
         Body,
         ToReplace
     ),
-    
+
     % Then, add new trails
     case map_size(ToAdd) of
         0 -> UpdatedBody;
@@ -643,16 +629,16 @@ insert_new_trails(Body, ToAdd, _HandlerName, _MetadataModule) ->
         fun({_Path, TrailCode}) -> "        " ++ TrailCode end,
         maps:to_list(ToAdd)
     ),
-    
+
     NewTrailsStr = string:join(NewTrailsList, ",\n"),
-    
+
     % Try to find where to insert (before closing bracket or after last trail)
     case re:run(Body, "(\\])\\.\\s*$", [multiline, {capture, all, index}]) of
         {match, [{BracketPos, _}]} ->
             % Insert before closing bracket
             Before = string:substr(Body, 1, BracketPos - 1),
             After = string:substr(Body, BracketPos),
-            
+
             % Add comma if there's existing content
             case string:trim(Before) of
                 "" -> Before ++ "\n" ++ NewTrailsStr ++ "\n    " ++ After;
@@ -660,19 +646,19 @@ insert_new_trails(Body, ToAdd, _HandlerName, _MetadataModule) ->
             end;
         nomatch ->
             % Couldn't parse, append with comment
-            Body ++ "\n    %% TODO: Add these trails:\n    %% " ++ 
+            Body ++ "\n    %% TODO: Add these trails:\n    %% " ++
                 string:join(NewTrailsList, "\n    %% ")
     end.
 
 %% Fallback: Add TODO comment when auto-insertion fails
 add_todo_comment(ContentStr, NewTrailsMap, _MetadataModule) ->
     NewTrails = lists:map(
-        fun({Path, TrailCode}) -> 
+        fun({Path, TrailCode}) ->
             io_lib:format("  - ~s\n%%         ~s", [Path, TrailCode])
         end,
         maps:to_list(NewTrailsMap)
     ),
-    
+
     % Try to find trails() function
     case re:run(ContentStr, "^(trails\\(\\)\\s*->)", [multiline, {capture, all, index}]) of
         {match, [_FullMatch, {Start, Len}]} ->
@@ -681,7 +667,7 @@ add_todo_comment(ContentStr, NewTrailsMap, _MetadataModule) ->
                 "%%     ~s\n",
                 [string:join(NewTrails, "\n%%     ")]
             ),
-            
+
             {Before, After} = lists:split(Start + Len, ContentStr),
             list_to_binary(Before ++ TodoComment ++ After);
         _ ->
