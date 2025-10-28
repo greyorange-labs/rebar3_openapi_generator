@@ -165,9 +165,14 @@ parse_single_trail(Trail) when is_map(Trail) ->
 -------------------------------------------------------------------------------------------
 Extracts HTTP methods from trail metadata.
 Supports cowboy_swagger format where methods are direct keys in metadata.
+Handles cases where metadata is empty or not a map.
 -------------------------------------------------------------------------------------------
 """.
--spec extract_methods_from_trail(map()) -> [binary()].
+-spec extract_methods_from_trail(map() | list() | term()) -> [binary()].
+extract_methods_from_trail(Metadata) when not is_map(Metadata) ->
+    % Metadata is not a map (empty list, undefined, etc.)
+    % Return default GET method
+    [<<"GET">>];
 extract_methods_from_trail(Metadata) ->
     % cowboy_swagger format: methods are direct keys in metadata
     HttpMethods = [get, post, put, delete, patch, head, options],
@@ -414,10 +419,12 @@ has_metadata_for_path(Path, Metadata) ->
 Checks if trail metadata contains OpenAPI paths information (legacy format).
 -------------------------------------------------------------------------------------------
 """.
--spec has_openapi_metadata(map()) -> boolean().
-has_openapi_metadata(Metadata) ->
+-spec has_openapi_metadata(map() | term()) -> boolean().
+has_openapi_metadata(Metadata) when is_map(Metadata) ->
     maps:is_key(paths, Metadata) andalso
-        map_size(maps:get(paths, Metadata)) > 0.
+        map_size(maps:get(paths, Metadata)) > 0;
+has_openapi_metadata(_Metadata) ->
+    false.
 
 -doc """
 -------------------------------------------------------------------------------------------
@@ -425,10 +432,12 @@ Checks if trail metadata contains cowboy_swagger format metadata.
 In cowboy_swagger, HTTP methods are direct keys in the metadata map.
 -------------------------------------------------------------------------------------------
 """.
--spec has_cowboy_swagger_metadata(map()) -> boolean().
-has_cowboy_swagger_metadata(Metadata) ->
+-spec has_cowboy_swagger_metadata(map() | term()) -> boolean().
+has_cowboy_swagger_metadata(Metadata) when is_map(Metadata) ->
     HttpMethods = [get, post, put, delete, patch, head, options],
-    lists:any(fun(Method) -> maps:is_key(Method, Metadata) end, HttpMethods).
+    lists:any(fun(Method) -> maps:is_key(Method, Metadata) end, HttpMethods);
+has_cowboy_swagger_metadata(_Metadata) ->
+    false.
 
 -doc """
 -------------------------------------------------------------------------------------------
