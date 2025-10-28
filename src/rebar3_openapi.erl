@@ -271,7 +271,8 @@ generate_coverage_report(AppName, Handlers, OutputDir) ->
     % Write human-readable report
     CoverageFile = filename:join(OutputDir, atom_to_list(AppName) ++ "_coverage.txt"),
     CoverageText = openapi_coverage:format_report(CoverageReport),
-    ok = file:write_file(CoverageFile, CoverageText),
+    CoverageTextBin = iolist_to_binary(CoverageText),
+    ok = file:write_file(CoverageFile, CoverageTextBin),
 
     % Print summary to console
     rebar_api:info("~n~s", [CoverageText]),
