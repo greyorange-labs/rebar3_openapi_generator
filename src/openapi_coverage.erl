@@ -121,8 +121,15 @@ analyze_handler(Module) ->
             IncompleteDetails = lists:flatmap(
                 fun(Route) ->
                     Path = maps:get(path, Route),
-                    Method = hd(maps:get(methods, Route)),
-                    check_route_completeness(Path, Method, Metadata)
+                    Methods = maps:get(methods, Route),
+                    % Process each method for the route
+                    lists:flatmap(
+                        fun(Method) ->
+                            MethodBin = ensure_binary_method(Method),
+                            check_route_completeness(Path, MethodBin, Metadata)
+                        end,
+                        Methods
+                    )
                 end,
                 Incomplete
             ),
@@ -164,8 +171,10 @@ has_complete_metadata_for_path(Path, Route, Metadata) ->
             RouteMethods = maps:get(methods, Route),
             lists:all(
                 fun(Method) ->
-                    MethodLower = string:lowercase(binary_to_list(Method)),
-                    has_complete_method_metadata(<<MethodLower>>, MethodsMap)
+                    % Ensure Method is binary before converting to list
+                    MethodBin = ensure_binary_method(Method),
+                    MethodLower = string:lowercase(binary_to_list(MethodBin)),
+                    has_complete_method_metadata(list_to_binary(MethodLower), MethodsMap)
                 end,
                 RouteMethods
             )
@@ -223,15 +232,17 @@ check_route_completeness(Path, Method, Metadata) ->
         undefined ->
             [];
         MethodsMap ->
-            MethodLower = string:lowercase(binary_to_list(Method)),
-            case maps:get(<<MethodLower>>, MethodsMap, undefined) of
+            % Ensure Method is binary before processing
+            MethodBin = ensure_binary_method(Method),
+            MethodLower = string:lowercase(binary_to_list(MethodBin)),
+            case maps:get(list_to_binary(MethodLower), MethodsMap, undefined) of
                 undefined ->
-                    [#{path => Path, method => Method, issues => [<<"No metadata defined">>]}];
+                    [#{path => Path, method => MethodBin, issues => [<<"No metadata defined">>]}];
                 OpSpec ->
-                    Issues = collect_operation_issues(OpSpec, Method),
+                    Issues = collect_operation_issues(OpSpec, MethodBin),
                     case Issues of
                         [] -> [];
-                        _ -> [#{path => Path, method => Method, issues => Issues}]
+                        _ -> [#{path => Path, method => MethodBin, issues => Issues}]
                     end
             end
     end.
@@ -538,3 +549,18 @@ format_suggestions(Report) ->
             SuggestionList = iolist_to_binary(lists:join(<<"\n">>, AllSuggestions)),
             <<Header/binary, SuggestionList/binary, "\n">>
     end.
+
+-doc """
+-------------------------------------------------------------------------------------------
+Ensures a method value is converted to binary.
+Handles atoms, strings, binaries, and integers (for edge cases).
+-------------------------------------------------------------------------------------------
+""".
+-spec ensure_binary_method(term()) -> binary().
+ensure_binary_method(Method) when is_binary(Method) -> Method;
+ensure_binary_method(Method) when is_atom(Method) -> atom_to_binary(Method, utf8);
+ensure_binary_method(Method) when is_list(Method) -> list_to_binary(Method);
+ensure_binary_method(Method) when is_integer(Method) ->
+    % Edge case: if somehow Method is an integer, convert to binary
+    % This shouldn't happen but adding for defensive programming
+    list_to_binary(integer_to_list(Method)).
