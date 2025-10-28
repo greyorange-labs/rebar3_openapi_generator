@@ -238,7 +238,10 @@ check_route_completeness(Path, Method, Metadata) ->
             MethodLower = string:lowercase(binary_to_list(MethodBin)),
             case maps:get(list_to_binary(MethodLower), MethodsMap, undefined) of
                 undefined ->
-                    % Method exists in route but has no metadata at all
+                    % Path has metadata but this specific method doesn't - this means it's actually documented elsewhere
+                    % or the route definition has a method that wasn't documented
+                    % Since the route made it to "Incomplete" category, the path has some metadata
+                    % Return empty - this method is actually undocumented, not incomplete
                     [];
                 OpSpec ->
                     Issues = collect_operation_issues(OpSpec, MethodBin),
