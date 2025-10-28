@@ -20,7 +20,8 @@ init(State) ->
         {module, ?MODULE},
         {bare, true},
         {deps, ?DEPS},
-        {example, "rebar3 openapi import --spec openapi.yaml --handler-path ./src/my_handler.erl --metadata-path ./src/my_metadata.erl"},
+        {example,
+            "rebar3 openapi import --spec openapi.yaml --handler-path ./src/my_handler.erl --metadata-path ./src/my_metadata.erl"},
         {short_desc, "Import OpenAPI spec and generate Erlang trails definitions"},
         {desc,
             "Import an OpenAPI YAML specification and generate Erlang handler modules "
@@ -28,7 +29,8 @@ init(State) ->
         {opts, [
             {spec, $s, "spec", string, "Path to OpenAPI YAML specification file (required)"},
             {handler_path, $h, "handler-path", string, "Output path for handler module, e.g. ./src/my_handler.erl (required)"},
-            {metadata_path, $m, "metadata-path", string, "Output path for metadata module, e.g. ./src/my_metadata.erl (required)"},
+            {metadata_path, $m, "metadata-path", string,
+                "Output path for metadata module, e.g. ./src/my_metadata.erl (required)"},
             {handler_name, undefined, "handler-name", {string, "handler_module"},
                 "Handler module name to use in trails (e.g. my_http_handler)"},
             {overwrite, $w, "overwrite", {boolean, false}, "Overwrite existing files"},
@@ -334,12 +336,19 @@ merge_metadata_file(FilePath, ModuleName, NewPaths) ->
                     rebar_api:info("No new or updated functions to merge", []),
                     ok;
                 {AddCount, UpdateCount} ->
-                    rebar_api:info("Adding ~p new function(s), updating ~p existing function(s)",
-                                  [AddCount, UpdateCount]),
+                    rebar_api:info(
+                        "Adding ~p new function(s), updating ~p existing function(s)",
+                        [AddCount, UpdateCount]
+                    ),
 
                     % Generate updated content
-                    UpdatedContent = update_metadata_module(ExistingContent, ModuleName,
-                                                           NewFunctions, ToAdd, ToUpdate),
+                    UpdatedContent = update_metadata_module(
+                        ExistingContent,
+                        ModuleName,
+                        NewFunctions,
+                        ToAdd,
+                        ToUpdate
+                    ),
                     file:write_file(FilePath, UpdatedContent)
             end;
         {error, Reason} ->
@@ -369,8 +378,12 @@ merge_handler_file(FilePath, _HandlerModule, MetadataModule, HandlerName, NewPat
                     ok;
                 _ ->
                     rebar_api:info("Adding ~p new path(s) to handler", [length(PathsToAdd)]),
-                    UpdatedContent = add_trails_to_module(ExistingContent, PathsToAdd,
-                                                         MetadataModule, HandlerName),
+                    UpdatedContent = add_trails_to_module(
+                        ExistingContent,
+                        PathsToAdd,
+                        MetadataModule,
+                        HandlerName
+                    ),
                     file:write_file(FilePath, UpdatedContent)
             end;
         {error, Reason} ->
@@ -448,11 +461,11 @@ update_metadata_module(ExistingContent, ModuleName, NewFunctions, ToAdd, ToUpdat
     FormattedCode = openapi_code_generator:format_erlang_code(Code),
 
     % Add comment about updated functions
-    UpdateComment = case {length(ToAdd), length(ToUpdate)} of
-        {0, 0} -> "";
-        {A, U} ->
-            io_lib:format("%% Updated by rebar3 openapi import: ~p new, ~p updated~n", [A, U])
-    end,
+    UpdateComment =
+        case {length(ToAdd), length(ToUpdate)} of
+            {0, 0} -> "";
+            {A, U} -> io_lib:format("%% Updated by rebar3 openapi import: ~p new, ~p updated~n", [A, U])
+        end,
 
     [UpdateComment, FormattedCode].
 
@@ -462,7 +475,8 @@ reconstruct_paths_from_functions(FunctionMap, FunctionNames) ->
     Grouped = lists:foldl(
         fun(FuncName, Acc) ->
             case maps:get(FuncName, FunctionMap, undefined) of
-                undefined -> Acc;
+                undefined ->
+                    Acc;
                 {Path, Method} ->
                     maps:update_with(
                         Path,
@@ -501,12 +515,11 @@ normalize_path_for_cowboy(Path) ->
 
 %% Add new trails to existing module
 add_trails_to_module(ExistingContent, PathsToAdd, MetadataModule, HandlerName) ->
-    % Find the closing bracket of the trails/0 function
     ContentStr = binary_to_list(ExistingContent),
 
-    % Generate new trail entries
-    NewTrails = lists:map(
-        fun(PathData) ->
+    % Generate new trail entries as a map for easy lookup
+    NewTrailsMap = lists:foldl(
+        fun(PathData, Acc) ->
             Path = maps:get(path, PathData),
             Operations = maps:get(operations, PathData),
             CowboyPath = normalize_path_for_cowboy(binary_to_list(Path)),
@@ -515,50 +528,168 @@ add_trails_to_module(ExistingContent, PathsToAdd, MetadataModule, HandlerName) -
             [FirstMethod | _] = maps:keys(Operations),
             FuncName = path_to_function_name(Path, FirstMethod),
 
-            io_lib:format("        trails:trail(\"~s\", ~s, [], ~s:~s())",
-                         [CowboyPath, HandlerName, MetadataModule, FuncName])
+            TrailCode = io_lib:format(
+                "trails:trail(\"~s\", ~s, [], ~s:~s())",
+                [CowboyPath, HandlerName, MetadataModule, FuncName]
+            ),
+            Acc#{CowboyPath => lists:flatten(TrailCode)}
         end,
+        #{},
         PathsToAdd
     ),
 
-    % First, try to find trails/0 function and insert TODO at the beginning
-    case re:run(ContentStr, "^(trails\\(\\)\\s*->)", [multiline, {capture, all, index}]) of
-        {match, [_FullMatch, {Start, Len}]} ->
-            % Found trails() function, add TODO comment right after the function declaration
-            NewTrailsStr = string:join(NewTrails, "\n%%         "),
-            
-            % Get paths for the TODO message
-            PathsList = lists:map(
-                fun(PathData) ->
-                    Path = maps:get(path, PathData),
-                    CowboyPath = normalize_path_for_cowboy(binary_to_list(Path)),
-                    io_lib:format("  - ~s", [CowboyPath])
-                end,
-                PathsToAdd
-            ),
-            PathsListStr = string:join(PathsList, "\n%%     "),
-            
-            TodoComment = io_lib:format(
-                "\n    %% TODO: Add/modify trails for the following route(s):\n"
-                "%%     ~s\n"
-                "%% \n"
-                "%% Use the following trail definitions:\n"
-                "%%         ~s\n",
-                [PathsListStr, NewTrailsStr]
-            ),
-            
-            % Insert TODO right after "trails() ->"
-            {Before, After} = lists:split(Start + Len, ContentStr),
-            UpdatedContent = Before ++ TodoComment ++ After,
+    % Try to automatically insert/replace trails in the function
+    case try_auto_insert_trails(ContentStr, NewTrailsMap, HandlerName, MetadataModule) of
+        {ok, UpdatedContent} ->
             list_to_binary(UpdatedContent);
-        _ ->
-            % Couldn't find trails/0 function, append comment at end as fallback
-            Comment = io_lib:format(
-                "\n\n%% TODO: Add trails/0 function or modify existing routing\n"
-                "%% New trails to add:\n"
-                "%%         ~s\n",
-                [string:join(NewTrails, ",\n%%         ")]
-            ),
-            <<ExistingContent/binary, (list_to_binary(Comment))/binary>>
+        {error, _Reason} ->
+            % Fallback to TODO comment approach
+            add_todo_comment(ContentStr, NewTrailsMap, MetadataModule)
     end.
 
+%% Try to automatically insert or replace trails in the trails/0 function
+try_auto_insert_trails(ContentStr, NewTrailsMap, HandlerName, MetadataModule) ->
+    % Find the trails/0 function body
+    case re:run(ContentStr, "^trails\\(\\)\\s*->\\s*\\n(.+?)^[a-z_]", 
+                [multiline, dotall, {capture, all, index}]) of
+        {match, [_FullMatch, {BodyStart, BodyLen}]} ->
+            % Extract the function body
+            FunctionBody = string:substr(ContentStr, BodyStart + 1, BodyLen),
+            
+            % Parse existing trails
+            ExistingTrails = parse_trails_from_body(FunctionBody),
+            
+            % Determine what to add/replace
+            {ToAdd, ToReplace} = categorize_trails(NewTrailsMap, ExistingTrails),
+            
+            case {map_size(ToAdd), map_size(ToReplace)} of
+                {0, 0} ->
+                    {error, no_changes_needed};
+                _ ->
+                    % Perform the modifications
+                    UpdatedBody = apply_trail_modifications(
+                        FunctionBody, ToAdd, ToReplace, HandlerName, MetadataModule
+                    ),
+                    
+                    % Reconstruct the file
+                    Before = string:substr(ContentStr, 1, BodyStart),
+                    After = string:substr(ContentStr, BodyStart + BodyLen + 1),
+                    UpdatedContent = Before ++ UpdatedBody ++ After,
+                    {ok, UpdatedContent}
+            end;
+        nomatch ->
+            {error, trails_function_not_found}
+    end.
+
+%% Parse existing trail definitions from function body
+parse_trails_from_body(Body) ->
+    % Match both formats:
+    % 1. trails:trail("/path", handler, [], metadata:func())
+    % 2. {"/path", handler, []}
+    TrailPattern = "trails:trail\\(\"([^\"]+)\"[^)]+\\)",
+    TuplePattern = "\\{\"([^\"]+)\"",
+    
+    TrailPaths = case re:run(Body, TrailPattern, [global, {capture, all_but_first, list}]) of
+        {match, Matches1} -> [Path || [Path] <- Matches1];
+        nomatch -> []
+    end,
+    
+    TuplePaths = case re:run(Body, TuplePattern, [global, {capture, all_but_first, list}]) of
+        {match, Matches2} -> [Path || [Path] <- Matches2];
+        nomatch -> []
+    end,
+    
+    sets:from_list(TrailPaths ++ TuplePaths, [{version, 2}]).
+
+%% Categorize trails into those to add vs replace
+categorize_trails(NewTrailsMap, ExistingTrailsSet) ->
+    maps:fold(
+        fun(Path, TrailCode, {AddAcc, ReplaceAcc}) ->
+            case sets:is_element(Path, ExistingTrailsSet) of
+                true -> {AddAcc, ReplaceAcc#{Path => TrailCode}};
+                false -> {AddAcc#{Path => TrailCode}, ReplaceAcc}
+            end
+        end,
+        {#{}, #{}},
+        NewTrailsMap
+    ).
+
+%% Apply trail modifications to the function body
+apply_trail_modifications(Body, ToAdd, ToReplace, HandlerName, MetadataModule) ->
+    % First, replace existing trails
+    UpdatedBody = maps:fold(
+        fun(Path, NewTrailCode, BodyAcc) ->
+            % Match both old formats and replace with new trail format
+            Pattern1 = io_lib:format("trails:trail\\(\"~s\"[^)]+\\)", [re:replace(Path, ":", "\\\\:", [global, {return, list}])]),
+            Pattern2 = io_lib:format("\\{\"~s\"[^}]+\\}", [re:replace(Path, ":", "\\\\:", [global, {return, list}])]),
+            
+            Temp = re:replace(BodyAcc, Pattern1, NewTrailCode, [{return, list}, global]),
+            re:replace(Temp, Pattern2, NewTrailCode, [{return, list}, global])
+        end,
+        Body,
+        ToReplace
+    ),
+    
+    % Then, add new trails
+    case map_size(ToAdd) of
+        0 -> UpdatedBody;
+        _ -> insert_new_trails(UpdatedBody, ToAdd, HandlerName, MetadataModule)
+    end.
+
+%% Insert new trails into the function body
+insert_new_trails(Body, ToAdd, _HandlerName, _MetadataModule) ->
+    % Find the last trail entry or closing bracket to insert before
+    NewTrailsList = lists:map(
+        fun({_Path, TrailCode}) -> "        " ++ TrailCode end,
+        maps:to_list(ToAdd)
+    ),
+    
+    NewTrailsStr = string:join(NewTrailsList, ",\n"),
+    
+    % Try to find where to insert (before closing bracket or after last trail)
+    case re:run(Body, "(\\])\\.\\s*$", [multiline, {capture, all, index}]) of
+        {match, [{BracketPos, _}]} ->
+            % Insert before closing bracket
+            Before = string:substr(Body, 1, BracketPos - 1),
+            After = string:substr(Body, BracketPos),
+            
+            % Add comma if there's existing content
+            case string:trim(Before) of
+                "" -> Before ++ "\n" ++ NewTrailsStr ++ "\n    " ++ After;
+                _ -> Before ++ ",\n" ++ NewTrailsStr ++ "\n    " ++ After
+            end;
+        nomatch ->
+            % Couldn't parse, append with comment
+            Body ++ "\n    %% TODO: Add these trails:\n    %% " ++ 
+                string:join(NewTrailsList, "\n    %% ")
+    end.
+
+%% Fallback: Add TODO comment when auto-insertion fails
+add_todo_comment(ContentStr, NewTrailsMap, _MetadataModule) ->
+    NewTrails = lists:map(
+        fun({Path, TrailCode}) -> 
+            io_lib:format("  - ~s\n%%         ~s", [Path, TrailCode])
+        end,
+        maps:to_list(NewTrailsMap)
+    ),
+    
+    % Try to find trails() function
+    case re:run(ContentStr, "^(trails\\(\\)\\s*->)", [multiline, {capture, all, index}]) of
+        {match, [_FullMatch, {Start, Len}]} ->
+            TodoComment = io_lib:format(
+                "\n    %% TODO: Add/modify trails for the following route(s):\n"
+                "%%     ~s\n",
+                [string:join(NewTrails, "\n%%     ")]
+            ),
+            
+            {Before, After} = lists:split(Start + Len, ContentStr),
+            list_to_binary(Before ++ TodoComment ++ After);
+        _ ->
+            % Append at end
+            Comment = io_lib:format(
+                "\n\n%% TODO: Add trails/0 function with:\n"
+                "%%     ~s\n",
+                [string:join(NewTrails, "\n%%     ")]
+            ),
+            list_to_binary(ContentStr ++ Comment)
+    end.
