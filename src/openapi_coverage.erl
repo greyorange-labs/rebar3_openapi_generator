@@ -31,7 +31,8 @@ Properly categorizes routes as:
 -type route_status() :: #{
     path := binary(),
     method := binary(),
-    issues => [binary()]  % Only for incomplete routes
+    % Only for incomplete routes
+    issues => [binary()]
 }.
 
 -export_type([coverage_report/0, handler_coverage/0, route_status/0]).
@@ -103,10 +104,11 @@ analyze_handler(Module) ->
             Undocumented = [R || {undocumented, R} <- AllRouteStatuses],
 
             TotalRoutes = length(Complete) + length(Incomplete) + length(Undocumented),
-            CoveragePercent = case TotalRoutes of
-                0 -> 0.0;
-                _ -> (length(Complete) / TotalRoutes) * 100
-            end,
+            CoveragePercent =
+                case TotalRoutes of
+                    0 -> 0.0;
+                    _ -> (length(Complete) / TotalRoutes) * 100
+                end,
 
             {ok, #{
                 module => Module,
@@ -151,54 +153,63 @@ check_completeness(OpSpec, Method) ->
     Issues = [],
 
     % Must-have: summary
-    Issues1 = case maps:is_key(summary, OpSpec) of
-        false -> [<<"Missing 'summary'">> | Issues];
-        true -> Issues
-    end,
+    Issues1 =
+        case maps:is_key(summary, OpSpec) of
+            false -> [<<"Missing 'summary'">> | Issues];
+            true -> Issues
+        end,
 
     % Must-have: operationId
-    Issues2 = case maps:is_key(operationId, OpSpec) of
-        false -> [<<"Missing 'operationId'">> | Issues1];
-        true -> Issues1
-    end,
+    Issues2 =
+        case maps:is_key(operationId, OpSpec) of
+            false -> [<<"Missing 'operationId'">> | Issues1];
+            true -> Issues1
+        end,
 
-    % Must-have: description  
-    Issues3 = case maps:is_key(description, OpSpec) of
-        false -> [<<"Missing 'description'">> | Issues2];
-        true -> Issues2
-    end,
+    % Must-have: description
+    Issues3 =
+        case maps:is_key(description, OpSpec) of
+            false -> [<<"Missing 'description'">> | Issues2];
+            true -> Issues2
+        end,
 
     % Must-have: tags
-    Issues4 = case maps:is_key(tags, OpSpec) of
-        false -> [<<"Missing 'tags'">> | Issues3];
-        true -> Issues3
-    end,
+    Issues4 =
+        case maps:is_key(tags, OpSpec) of
+            false -> [<<"Missing 'tags'">> | Issues3];
+            true -> Issues3
+        end,
 
     % Must-have: responses
-    Issues5 = case maps:is_key(responses, OpSpec) of
-        false -> [<<"Missing 'responses'">> | Issues4];
-        true ->
-            Responses = maps:get(responses, OpSpec),
-            case map_size(Responses) > 0 of
-                false -> [<<"Empty 'responses'">> | Issues4];
-                true -> check_response_content(Responses, Issues4)
-            end
-    end,
+    Issues5 =
+        case maps:is_key(responses, OpSpec) of
+            false ->
+                [<<"Missing 'responses'">> | Issues4];
+            true ->
+                Responses = maps:get(responses, OpSpec),
+                case map_size(Responses) > 0 of
+                    false -> [<<"Empty 'responses'">> | Issues4];
+                    true -> check_response_content(Responses, Issues4)
+                end
+        end,
 
     % Must-have: requestBody for POST/PUT/PATCH
-    Issues6 = case lists:member(Method, [<<"POST">>, <<"PUT">>, <<"PATCH">>]) of
-        true ->
-            case maps:is_key(requestBody, OpSpec) of
-                false -> [<<"Missing 'requestBody' for ", Method/binary>> | Issues5];
-                true ->
-                    RB = maps:get(requestBody, OpSpec),
-                    case maps:is_key(content, RB) of
-                        false -> [<<"requestBody missing 'content'">> | Issues5];
-                        true -> Issues5
-                    end
-            end;
-        false -> Issues5
-    end,
+    Issues6 =
+        case lists:member(Method, [<<"POST">>, <<"PUT">>, <<"PATCH">>]) of
+            true ->
+                case maps:is_key(requestBody, OpSpec) of
+                    false ->
+                        [<<"Missing 'requestBody' for ", Method/binary>> | Issues5];
+                    true ->
+                        RB = maps:get(requestBody, OpSpec),
+                        case maps:is_key(content, RB) of
+                            false -> [<<"requestBody missing 'content'">> | Issues5];
+                            true -> Issues5
+                        end
+                end;
+            false ->
+                Issues5
+        end,
 
     Issues6.
 
@@ -211,7 +222,8 @@ check_response_content(Responses, Acc) ->
             case is_success_code(Code) andalso Code =/= <<"204">> of
                 true ->
                     case maps:is_key(content, ResponseSpec) of
-                        false -> [<<"Response ", Code/binary, " missing 'content'">> | Issues];
+                        false ->
+                            [<<"Response ", Code/binary, " missing 'content'">> | Issues];
                         true ->
                             Content = maps:get(content, ResponseSpec),
                             case map_size(Content) > 0 of
@@ -219,7 +231,8 @@ check_response_content(Responses, Acc) ->
                                 true -> Issues
                             end
                     end;
-                false -> Issues
+                false ->
+                    Issues
             end
         end,
         Acc,
@@ -252,21 +265,23 @@ format_report(Report) ->
     Handlers = maps:get(handlers, Report),
     Coverage = maps:get(total_coverage, Report),
 
-    Icon = if
-        Coverage >= 80.0 -> "[OK]";
-        Coverage >= 50.0 -> "[WARN]";
-        true -> "[FAIL]"
-    end,
+    Icon =
+        if
+            Coverage >= 80.0 -> "[OK]";
+            Coverage >= 50.0 -> "[WARN]";
+            true -> "[FAIL]"
+        end,
 
     Header = "\n================================================================\n",
     Title = io_lib:format("~s OpenAPI Coverage Report: ~s\n", [Icon, atom_to_list(AppName)]),
     Separator = "================================================================\n\n",
     SummaryLine = io_lib:format("[*] ~s\n\n", [Summary]),
 
-    HandlerLines = case Handlers of
-        [] -> ["No handlers found.\n"];
-        _ -> lists:map(fun format_handler/1, Handlers)
-    end,
+    HandlerLines =
+        case Handlers of
+            [] -> ["No handlers found.\n"];
+            _ -> lists:map(fun format_handler/1, Handlers)
+        end,
 
     Footer = "\n================================================================\n",
 
@@ -280,60 +295,76 @@ format_handler(HC) ->
     Incomplete = maps:get(incomplete_routes, HC),
     Undocumented = maps:get(undocumented_routes, HC),
 
-    Icon = if
-        Coverage >= 80.0 -> "[OK]";
-        Coverage >= 50.0 -> "[WARN]";
-        true -> "[FAIL]"
-    end,
+    Icon =
+        if
+            Coverage >= 80.0 -> "[OK]";
+            Coverage >= 50.0 -> "[WARN]";
+            true -> "[FAIL]"
+        end,
 
     ModuleLine = io_lib:format("~s ~s (~.1f% complete)\n", [Icon, atom_to_list(Module), Coverage]),
 
-    CompleteLines = case Complete of
-        [] -> [];
-        _ -> [io_lib:format("  + Complete (~s routes):\n", [integer_to_list(length(Complete))])
-              | lists:map(fun(R) ->
-                    io_lib:format("     ~s [~s]\n", [
-                        maps:get(path, R),
-                        maps:get(method, R)
-                    ])
-                end, lists:sublist(Complete, 5))] ++
-              case length(Complete) > 5 of
-                  true -> [io_lib:format("     ... and ~s more\n", [integer_to_list(length(Complete) - 5)])];
-                  false -> []
-              end
-    end,
+    CompleteLines =
+        case Complete of
+            [] ->
+                [];
+            _ ->
+                [
+                    io_lib:format("  + Complete (~s routes):\n", [integer_to_list(length(Complete))])
+                    | lists:map(
+                        fun(R) ->
+                            io_lib:format("     ~s [~s]\n", [
+                                maps:get(path, R),
+                                maps:get(method, R)
+                            ])
+                        end,
+                        Complete
+                    )
+                ]
+        end,
 
-    IncompleteLines = case Incomplete of
-        [] -> [];
-        _ -> [io_lib:format("  ! Incomplete (~s routes):\n", [integer_to_list(length(Incomplete))])
-              | lists:map(fun(R) ->
-                    Issues = maps:get(issues, R),
-                    IssuesStr = iolist_to_binary(lists:join(", ", Issues)),
-                    io_lib:format("     ~s [~s]: ~s\n", [
-                        maps:get(path, R),
-                        maps:get(method, R),
-                        IssuesStr
-                    ])
-                end, lists:sublist(Incomplete, 10))] ++
-              case length(Incomplete) > 10 of
-                  true -> [io_lib:format("     ... and ~s more\n", [integer_to_list(length(Incomplete) - 10)])];
-                  false -> []
-              end
-    end,
+    IncompleteLines =
+        case Incomplete of
+            [] ->
+                [];
+            _ ->
+                [
+                    io_lib:format("  ! Incomplete (~s routes):\n", [integer_to_list(length(Incomplete))])
+                    | lists:map(
+                        fun(R) ->
+                            Issues = maps:get(issues, R),
+                            IssuesStr = iolist_to_binary(lists:join(", ", Issues)),
+                            io_lib:format("     ~s [~s]\n       Missing: ~s\n", [
+                                maps:get(path, R),
+                                maps:get(method, R),
+                                IssuesStr
+                            ])
+                        end,
+                        Incomplete
+                    )
+                ]
+        end,
 
-    UndocumentedLines = case Undocumented of
-        [] -> [];
-        _ -> [io_lib:format("  X Undocumented (~s routes):\n", [integer_to_list(length(Undocumented))])
-              | lists:map(fun(R) ->
-                    io_lib:format("     ~s [~s]\n", [
-                        maps:get(path, R),
-                        maps:get(method, R)
-                    ])
-                end, lists:sublist(Undocumented, 5))] ++
-              case length(Undocumented) > 5 of
-                  true -> [io_lib:format("     ... and ~s more\n", [integer_to_list(length(Undocumented) - 5)])];
-                  false -> []
-              end
-    end,
+    UndocumentedLines =
+        case Undocumented of
+            [] ->
+                [];
+            _ ->
+                [
+                    io_lib:format("  X Undocumented (~s routes):\n", [integer_to_list(length(Undocumented))])
+                    | lists:map(
+                        fun(R) ->
+                            Issues = maps:get(issues, R, [<<"No metadata defined">>]),
+                            IssuesStr = iolist_to_binary(lists:join(", ", Issues)),
+                            io_lib:format("     ~s [~s]\n       Reason: ~s\n", [
+                                maps:get(path, R),
+                                maps:get(method, R),
+                                IssuesStr
+                            ])
+                        end,
+                        Undocumented
+                    )
+                ]
+        end,
 
     [ModuleLine, CompleteLines, IncompleteLines, UndocumentedLines, "\n"].

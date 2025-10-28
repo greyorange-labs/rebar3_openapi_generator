@@ -123,12 +123,14 @@ execute_generation(State, AppName, Destination, Args) ->
 
     % Determine format from file extension
     Extension = filename:extension(Destination),
-    Format = case Extension of
-        ".json" -> "json";
-        ".yml" -> "yaml";
-        ".yaml" -> "yaml";
-        _ -> "yaml"  % Default fallback
-    end,
+    Format =
+        case Extension of
+            ".json" -> "json";
+            ".yml" -> "yaml";
+            ".yaml" -> "yaml";
+            % Default fallback
+            _ -> "yaml"
+        end,
 
     rebar_api:info("Generating OpenAPI spec for app: ~p", [AppName]),
     rebar_api:info("Output destination: ~s", [Destination]),
