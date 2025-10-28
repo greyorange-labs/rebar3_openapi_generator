@@ -240,8 +240,8 @@ ensure_binary(V) when is_integer(V) -> list_to_binary(integer_to_list(V)).
 format_summary(Coverage, Complete, Total) ->
     iolist_to_binary(
         io_lib:format(
-            "Coverage: ~.1f% (~p/~p routes complete)",
-            [Coverage, Complete, Total]
+            "Coverage: ~.1f% (~s/~s routes complete)",
+            [Coverage, integer_to_list(Complete), integer_to_list(Total)]
         )
     ).
 
@@ -286,11 +286,11 @@ format_handler(HC) ->
         true -> "[FAIL]"
     end,
 
-    ModuleLine = io_lib:format("~s ~p (~.1f% complete)\n", [Icon, Module, Coverage]),
+    ModuleLine = io_lib:format("~s ~s (~.1f% complete)\n", [Icon, atom_to_list(Module), Coverage]),
 
     CompleteLines = case Complete of
         [] -> [];
-        _ -> [io_lib:format("  ✓ Complete (~w routes):\n", [length(Complete)])
+        _ -> [io_lib:format("  ✓ Complete (~s routes):\n", [integer_to_list(length(Complete))])
               | lists:map(fun(R) ->
                     io_lib:format("     ~s [~s]\n", [
                         maps:get(path, R),
@@ -298,14 +298,14 @@ format_handler(HC) ->
                     ])
                 end, lists:sublist(Complete, 5))] ++
               case length(Complete) > 5 of
-                  true -> [io_lib:format("     ... and ~w more\n", [length(Complete) - 5])];
+                  true -> [io_lib:format("     ... and ~s more\n", [integer_to_list(length(Complete) - 5)])];
                   false -> []
               end
     end,
 
     IncompleteLines = case Incomplete of
         [] -> [];
-        _ -> [io_lib:format("  ⚠ Incomplete (~w routes):\n", [length(Incomplete)])
+        _ -> [io_lib:format("  ⚠ Incomplete (~s routes):\n", [integer_to_list(length(Incomplete))])
               | lists:map(fun(R) ->
                     Issues = maps:get(issues, R),
                     IssuesStr = iolist_to_binary(lists:join(", ", Issues)),
@@ -316,14 +316,14 @@ format_handler(HC) ->
                     ])
                 end, lists:sublist(Incomplete, 10))] ++
               case length(Incomplete) > 10 of
-                  true -> [io_lib:format("     ... and ~w more\n", [length(Incomplete) - 10])];
+                  true -> [io_lib:format("     ... and ~s more\n", [integer_to_list(length(Incomplete) - 10)])];
                   false -> []
               end
     end,
 
     UndocumentedLines = case Undocumented of
         [] -> [];
-        _ -> [io_lib:format("  ✗ Undocumented (~w routes):\n", [length(Undocumented)])
+        _ -> [io_lib:format("  ✗ Undocumented (~s routes):\n", [integer_to_list(length(Undocumented))])
               | lists:map(fun(R) ->
                     io_lib:format("     ~s [~s]\n", [
                         maps:get(path, R),
@@ -331,7 +331,7 @@ format_handler(HC) ->
                     ])
                 end, lists:sublist(Undocumented, 5))] ++
               case length(Undocumented) > 5 of
-                  true -> [io_lib:format("     ... and ~w more\n", [length(Undocumented) - 5])];
+                  true -> [io_lib:format("     ... and ~s more\n", [integer_to_list(length(Undocumented) - 5)])];
                   false -> []
               end
     end,
