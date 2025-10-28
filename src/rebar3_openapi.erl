@@ -273,15 +273,9 @@ generate_coverage_report(AppName, Handlers, OutputDir) ->
     CoverageText = openapi_coverage:format_report(CoverageReport),
     ok = file:write_file(CoverageFile, CoverageText),
 
-    % Write suggestions as markdown
-    SuggestionsFile = filename:join(OutputDir, atom_to_list(AppName) ++ "_todo.md"),
-    SuggestionsText = openapi_coverage:format_suggestions(CoverageReport),
-    ok = file:write_file(SuggestionsFile, SuggestionsText),
-
     % Print summary to console
     rebar_api:info("~n~s", [CoverageText]),
     rebar_api:info("✓ Coverage report: ~s", [CoverageFile]),
-    rebar_api:info("✓ TODO list: ~s", [SuggestionsFile]),
     ok.
 
 -doc """

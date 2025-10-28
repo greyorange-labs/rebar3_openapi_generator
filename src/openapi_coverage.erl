@@ -1,24 +1,16 @@
 -module(openapi_coverage).
 
 -doc """
--------------------------------------------------------------------------------------------
-Coverage reporting module for OpenAPI documentation.
-Analyzes handlers to determine which routes are documented and which need attention.
-Generates human-readable reports with actionable suggestions.
-
-Enhanced to check OpenAPI 3.0.3 completeness including:
-- Missing request bodies
-- Missing response content definitions
-- Missing required fields (summary, operationId, etc.)
-- Missing parameter schemas
--------------------------------------------------------------------------------------------
+Coverage reporting module for OpenAPI documentation - REWRITTEN.
+Properly categorizes routes as:
+- Documented (100% complete - all must-have fields present)
+- Incomplete (has metadata but missing required fields - shows specific issues)
+- Undocumented (no metadata at all)
 """.
 
 -export([
     generate_report/2,
-    format_report/1,
-    format_suggestions/1,
-    check_operation_completeness/1
+    format_report/1
 ]).
 
 -type coverage_report() :: #{
@@ -31,25 +23,19 @@ Enhanced to check OpenAPI 3.0.3 completeness including:
 -type handler_coverage() :: #{
     module := module(),
     coverage_percent := float(),
-    documented_routes := [binary()],
-    undocumented_routes := [binary()],
-    incomplete_routes := [incomplete_route_info()],
-    suggestions := [binary()]
+    complete_routes := [route_status()],
+    incomplete_routes := [route_status()],
+    undocumented_routes := [route_status()]
 }.
 
--type incomplete_route_info() :: #{
+-type route_status() :: #{
     path := binary(),
     method := binary(),
-    issues := [binary()]
+    issues => [binary()]  % Only for incomplete routes
 }.
 
--export_type([coverage_report/0, handler_coverage/0, incomplete_route_info/0]).
+-export_type([coverage_report/0, handler_coverage/0, route_status/0]).
 
--doc """
--------------------------------------------------------------------------------------------
-Generates a comprehensive coverage report for an application.
--------------------------------------------------------------------------------------------
-""".
 -spec generate_report(atom(), [module()]) -> coverage_report().
 generate_report(AppName, Handlers) ->
     HandlerCoverages = lists:filtermap(
@@ -63,362 +49,202 @@ generate_report(AppName, Handlers) ->
     ),
 
     TotalRoutes = lists:sum([
-        length(maps:get(documented_routes, HC, [])) +
-            length(maps:get(undocumented_routes, HC, [])) +
-            length(maps:get(incomplete_routes, HC, []))
+        length(maps:get(complete_routes, HC, [])) +
+            length(maps:get(incomplete_routes, HC, [])) +
+            length(maps:get(undocumented_routes, HC, []))
      || HC <- HandlerCoverages
     ]),
 
-    TotalDocumented = lists:sum([
-        length(maps:get(documented_routes, HC, []))
+    TotalComplete = lists:sum([
+        length(maps:get(complete_routes, HC, []))
      || HC <- HandlerCoverages
     ]),
 
     OverallCoverage =
         case TotalRoutes of
             0 -> 0.0;
-            _ -> (TotalDocumented / TotalRoutes) * 100
+            _ -> (TotalComplete / TotalRoutes) * 100
         end,
 
     #{
         app_name => AppName,
         handlers => HandlerCoverages,
         total_coverage => OverallCoverage,
-        summary => format_summary(OverallCoverage, TotalDocumented, TotalRoutes)
+        summary => format_summary(OverallCoverage, TotalComplete, TotalRoutes)
     }.
 
--doc """
--------------------------------------------------------------------------------------------
-Analyzes a single handler module for coverage.
--------------------------------------------------------------------------------------------
-""".
 -spec analyze_handler(module()) -> {ok, handler_coverage()} | {error, term()}.
 analyze_handler(Module) ->
     case openapi_parser:parse_handler(Module) of
         {ok, HandlerInfo} ->
             Routes = maps:get(routes, HandlerInfo),
             Metadata = maps:get(metadata, HandlerInfo),
+            PathsMap = maps:get(paths, Metadata, #{}),
 
-            % Categorize routes into documented, incomplete, and undocumented
-            {Documented, IncompleteAndUndoc} = lists:partition(
-                fun(Route) ->
-                    Path = maps:get(path, Route),
-                    has_complete_metadata_for_path(Path, Route, Metadata)
-                end,
-                Routes
-            ),
-
-            % Separate incomplete from undocumented
-            {Incomplete, Undocumented} = lists:partition(
-                fun(Route) ->
-                    Path = maps:get(path, Route),
-                    has_metadata_for_path(Path, Metadata)
-                end,
-                IncompleteAndUndoc
-            ),
-
-            % Analyze incomplete routes for specific issues
-            IncompleteDetails = lists:flatmap(
+            % Analyze each route+method combination
+            AllRouteStatuses = lists:flatmap(
                 fun(Route) ->
                     Path = maps:get(path, Route),
                     Methods = maps:get(methods, Route),
-                    % Process each method for the route
-                    lists:flatmap(
+                    lists:map(
                         fun(Method) ->
-                            MethodBin = ensure_binary_method(Method),
-                            check_route_completeness(Path, MethodBin, Metadata)
+                            MethodBin = ensure_binary(Method),
+                            analyze_route_method(Path, MethodBin, PathsMap)
                         end,
                         Methods
                     )
                 end,
-                Incomplete
+                Routes
             ),
 
-            DocumentedPaths = [maps:get(path, R) || R <- Documented],
-            UndocumentedPaths = [maps:get(path, R) || R <- Undocumented],
+            % Categorize
+            Complete = [R || {complete, R} <- AllRouteStatuses],
+            Incomplete = [R || {incomplete, R} <- AllRouteStatuses],
+            Undocumented = [R || {undocumented, R} <- AllRouteStatuses],
 
-            Suggestions = generate_suggestions(Undocumented, IncompleteDetails),
+            TotalRoutes = length(Complete) + length(Incomplete) + length(Undocumented),
+            CoveragePercent = case TotalRoutes of
+                0 -> 0.0;
+                _ -> (length(Complete) / TotalRoutes) * 100
+            end,
 
-            Coverage = #{
+            {ok, #{
                 module => Module,
-                coverage_percent => maps:get(
-                    coverage_percent,
-                    maps:get(coverage, HandlerInfo)
-                ),
-                documented_routes => DocumentedPaths,
-                undocumented_routes => UndocumentedPaths,
-                incomplete_routes => IncompleteDetails,
-                suggestions => Suggestions
-            },
-            {ok, Coverage};
+                coverage_percent => CoveragePercent,
+                complete_routes => Complete,
+                incomplete_routes => Incomplete,
+                undocumented_routes => Undocumented
+            }};
         {error, Reason} ->
             {error, Reason}
     end.
 
--doc """
--------------------------------------------------------------------------------------------
-Checks if a path has complete metadata defined according to OpenAPI 3.0.3 standards.
--------------------------------------------------------------------------------------------
-""".
--spec has_complete_metadata_for_path(binary(), map(), map()) -> boolean().
-has_complete_metadata_for_path(Path, Route, Metadata) ->
-    PathsMap = maps:get(paths, Metadata, #{}),
+%% Analyze a single path+method combination
+-spec analyze_route_method(binary(), binary(), map()) ->
+    {complete, route_status()} | {incomplete, route_status()} | {undocumented, route_status()}.
+analyze_route_method(Path, Method, PathsMap) ->
     case maps:get(Path, PathsMap, undefined) of
         undefined ->
-            false;
+            % No metadata at all
+            {undocumented, #{path => Path, method => Method}};
         MethodsMap ->
-            % Check all methods for completeness
-            RouteMethods = maps:get(methods, Route),
-            lists:all(
-                fun(Method) ->
-                    % Ensure Method is binary before converting to list
-                    MethodBin = ensure_binary_method(Method),
-                    MethodLower = string:lowercase(binary_to_list(MethodBin)),
-                    has_complete_method_metadata(list_to_binary(MethodLower), MethodsMap)
-                end,
-                RouteMethods
-            )
-    end.
-
--doc """
--------------------------------------------------------------------------------------------
-Checks if a specific method has complete metadata.
--------------------------------------------------------------------------------------------
-""".
--spec has_complete_method_metadata(binary(), map()) -> boolean().
-has_complete_method_metadata(MethodBin, MethodsMap) ->
-    case maps:get(MethodBin, MethodsMap, undefined) of
-        undefined ->
-            false;
-        OpSpec ->
-            has_operation_fields(OpSpec)
-    end.
-
--doc """
--------------------------------------------------------------------------------------------
-Checks if an operation has all required and recommended fields.
--------------------------------------------------------------------------------------------
-""".
--spec has_operation_fields(map()) -> boolean().
-has_operation_fields(OpSpec) ->
-    % Check for required fields
-    HasSummary = maps:is_key(summary, OpSpec),
-    HasOperationId = maps:is_key(operationId, OpSpec),
-    HasResponses =
-        maps:is_key(responses, OpSpec) andalso
-            map_size(maps:get(responses, OpSpec, #{})) > 0,
-
-    % All required fields must be present
-    HasSummary andalso HasOperationId andalso HasResponses.
-
--doc """
--------------------------------------------------------------------------------------------
-Checks if a path has metadata defined (regardless of completeness).
--------------------------------------------------------------------------------------------
-""".
--spec has_metadata_for_path(binary(), map()) -> boolean().
-has_metadata_for_path(Path, Metadata) ->
-    PathsMap = maps:get(paths, Metadata, #{}),
-    maps:is_key(Path, PathsMap).
-
--doc """
--------------------------------------------------------------------------------------------
-Analyzes incomplete routes to identify specific missing elements.
--------------------------------------------------------------------------------------------
-""".
--spec check_route_completeness(binary(), binary(), map()) -> [incomplete_route_info()].
-check_route_completeness(Path, Method, Metadata) ->
-    PathsMap = maps:get(paths, Metadata, #{}),
-    case maps:get(Path, PathsMap, undefined) of
-        undefined ->
-            [];
-        MethodsMap ->
-            % Ensure Method is binary before processing
-            MethodBin = ensure_binary_method(Method),
-            MethodLower = string:lowercase(binary_to_list(MethodBin)),
-            case maps:get(list_to_binary(MethodLower), MethodsMap, undefined) of
+            MethodLower = list_to_binary(string:lowercase(binary_to_list(Method))),
+            case maps:get(MethodLower, MethodsMap, undefined) of
                 undefined ->
-                    % Path has metadata but this specific method doesn't - this means it's actually documented elsewhere
-                    % or the route definition has a method that wasn't documented
-                    % Since the route made it to "Incomplete" category, the path has some metadata
-                    % Return empty - this method is actually undocumented, not incomplete
-                    [];
+                    % Path has metadata but not this method
+                    {undocumented, #{path => Path, method => Method}};
                 OpSpec ->
-                    Issues = collect_operation_issues(OpSpec, MethodBin),
+                    % Check completeness
+                    Issues = check_completeness(OpSpec, Method),
                     case Issues of
-                        [] -> [];
-                        _ -> [#{path => Path, method => MethodBin, issues => Issues}]
+                        [] ->
+                            {complete, #{path => Path, method => Method}};
+                        _ ->
+                            {incomplete, #{path => Path, method => Method, issues => Issues}}
                     end
             end
     end.
 
--doc """
--------------------------------------------------------------------------------------------
-Collects all issues for an incomplete operation.
--------------------------------------------------------------------------------------------
-""".
--spec collect_operation_issues(map(), binary()) -> [binary()].
-collect_operation_issues(OpSpec, Method) ->
+%% Check if operation has all required fields for good documentation
+-spec check_completeness(map(), binary()) -> [binary()].
+check_completeness(OpSpec, Method) ->
     Issues = [],
 
-    % Check required fields
-    Issues1 =
-        case maps:is_key(summary, OpSpec) of
-            false -> [<<"Missing 'summary' field">> | Issues];
-            true -> Issues
-        end,
+    % Must-have: summary
+    Issues1 = case maps:is_key(summary, OpSpec) of
+        false -> [<<"Missing 'summary'">> | Issues];
+        true -> Issues
+    end,
 
-    Issues2 =
-        case maps:is_key(operationId, OpSpec) of
-            false -> [<<"Missing 'operationId' field">> | Issues1];
-            true -> Issues1
-        end,
+    % Must-have: operationId
+    Issues2 = case maps:is_key(operationId, OpSpec) of
+        false -> [<<"Missing 'operationId'">> | Issues1];
+        true -> Issues1
+    end,
 
-    Issues3 =
-        case maps:is_key(responses, OpSpec) of
-            false ->
-                [<<"Missing 'responses' field">> | Issues2];
-            true ->
-                % Check response content
-                check_response_completeness(OpSpec, Issues2)
-        end,
+    % Must-have: description  
+    Issues3 = case maps:is_key(description, OpSpec) of
+        false -> [<<"Missing 'description'">> | Issues2];
+        true -> Issues2
+    end,
 
-    % Check requestBody for POST/PUT/PATCH
-    Issues4 =
-        case should_have_request_body(Method) of
-            true ->
-                case maps:is_key(requestBody, OpSpec) of
-                    false ->
-                        [<<"Missing 'requestBody' for ", Method/binary, " request">> | Issues3];
-                    true ->
-                        case maps:is_key(content, OpSpec) of
-                            false -> [<<"requestBody missing 'content' definition">> | Issues3];
-                            true -> Issues3
-                        end
-                end;
-            false ->
-                Issues3
-        end,
+    % Must-have: tags
+    Issues4 = case maps:is_key(tags, OpSpec) of
+        false -> [<<"Missing 'tags'">> | Issues3];
+        true -> Issues3
+    end,
 
-    % Check tags
-    Issues5 =
-        case maps:is_key(tags, OpSpec) of
-            false -> [<<"Missing 'tags' (recommended for grouping)">> | Issues4];
-            true -> Issues4
-        end,
+    % Must-have: responses
+    Issues5 = case maps:is_key(responses, OpSpec) of
+        false -> [<<"Missing 'responses'">> | Issues4];
+        true ->
+            Responses = maps:get(responses, OpSpec),
+            case map_size(Responses) > 0 of
+                false -> [<<"Empty 'responses'">> | Issues4];
+                true -> check_response_content(Responses, Issues4)
+            end
+    end,
 
-    Issues5.
+    % Must-have: requestBody for POST/PUT/PATCH
+    Issues6 = case lists:member(Method, [<<"POST">>, <<"PUT">>, <<"PATCH">>]) of
+        true ->
+            case maps:is_key(requestBody, OpSpec) of
+                false -> [<<"Missing 'requestBody' for ", Method/binary>> | Issues5];
+                true ->
+                    RB = maps:get(requestBody, OpSpec),
+                    case maps:is_key(content, RB) of
+                        false -> [<<"requestBody missing 'content'">> | Issues5];
+                        true -> Issues5
+                    end
+            end;
+        false -> Issues5
+    end,
 
--doc """
--------------------------------------------------------------------------------------------
-Checks if responses have proper content definitions.
--------------------------------------------------------------------------------------------
-""".
--spec check_response_completeness(map(), [binary()]) -> [binary()].
-check_response_completeness(OpSpec, Acc) ->
-    Responses = maps:get(responses, OpSpec, #{}),
-    IssueAcc = Acc,
+    Issues6.
 
+%% Check if success responses have content defined
+-spec check_response_content(map(), [binary()]) -> [binary()].
+check_response_content(Responses, Acc) ->
     lists:foldl(
         fun({Code, ResponseSpec}, Issues) ->
-            case maps:is_key(content, ResponseSpec) of
-                false ->
-                    % Check if this is an error code that might not need content
-                    case lists:member(Code, [<<"204">>, <<"304">>]) of
-                        true -> Issues;
-                        false -> [<<"Response ", Code/binary, " missing 'content' definition">> | Issues]
-                    end;
+            % Only check 2xx responses (except 204)
+            case is_success_code(Code) andalso Code =/= <<"204">> of
                 true ->
-                    Content = maps:get(content, ResponseSpec),
-                    case map_size(Content) of
-                        0 -> [<<"Response ", Code/binary, " has empty 'content'">> | Issues];
-                        _ -> Issues
-                    end
+                    case maps:is_key(content, ResponseSpec) of
+                        false -> [<<"Response ", Code/binary, " missing 'content'">> | Issues];
+                        true ->
+                            Content = maps:get(content, ResponseSpec),
+                            case map_size(Content) > 0 of
+                                false -> [<<"Response ", Code/binary, " has empty 'content'">> | Issues];
+                                true -> Issues
+                            end
+                    end;
+                false -> Issues
             end
         end,
-        IssueAcc,
+        Acc,
         maps:to_list(Responses)
     ).
 
--doc """
--------------------------------------------------------------------------------------------
-Checks if a method should have a requestBody.
--------------------------------------------------------------------------------------------
-""".
--spec should_have_request_body(binary()) -> boolean().
-should_have_request_body(Method) ->
-    lists:member(Method, [<<"POST">>, <<"PUT">>, <<"PATCH">>]).
+-spec is_success_code(binary()) -> boolean().
+is_success_code(<<$2, _, _>>) -> true;
+is_success_code(_) -> false.
 
--doc """
--------------------------------------------------------------------------------------------
-Checks operation completeness based on OpenAPI 3.0.3 standards.
--------------------------------------------------------------------------------------------
-""".
--spec check_operation_completeness(map()) -> {boolean(), [binary()]}.
-check_operation_completeness(OpSpec) ->
-    Issues = collect_operation_issues(OpSpec, <<"METHOD">>),
-    IsComplete = Issues == [],
-    {IsComplete, Issues}.
+-spec ensure_binary(term()) -> binary().
+ensure_binary(V) when is_binary(V) -> V;
+ensure_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
+ensure_binary(V) when is_list(V) -> list_to_binary(V);
+ensure_binary(V) when is_integer(V) -> list_to_binary(integer_to_list(V)).
 
--doc """
--------------------------------------------------------------------------------------------
-Generates actionable suggestions for undocumented and incomplete routes.
--------------------------------------------------------------------------------------------
-""".
--spec generate_suggestions([map()], [incomplete_route_info()]) -> [binary()].
-generate_suggestions(UndocumentedRoutes, IncompleteRoutes) ->
-    UndocSuggestions = lists:map(
-        fun(Route) ->
-            Path = maps:get(path, Route),
-            Methods = maps:get(methods, Route),
-            MethodsStr = iolist_to_binary(lists:join(<<", ">>, Methods)),
-            iolist_to_binary([
-                <<"Add metadata for ">>, Path, <<" (">>, MethodsStr, <<")">>
-            ])
-        end,
-        UndocumentedRoutes
-    ),
-
-    IncompleteSuggestions = lists:map(
-        fun(IncompleteRoute) ->
-            Path = maps:get(path, IncompleteRoute),
-            Method = maps:get(method, IncompleteRoute),
-            Issues = maps:get(issues, IncompleteRoute),
-            NumIssues = length(Issues),
-            iolist_to_binary([
-                <<"Complete API documentation for ">>,
-                Path,
-                <<" [">>,
-                Method,
-                <<"]: ">>,
-                integer_to_binary(NumIssues),
-                <<" field(s) need to be added/fixed to meet OpenAPI 3.0.3 standards">>
-            ])
-        end,
-        IncompleteRoutes
-    ),
-
-    UndocSuggestions ++ IncompleteSuggestions.
-
--doc """
--------------------------------------------------------------------------------------------
-Formats coverage summary as human-readable text.
--------------------------------------------------------------------------------------------
-""".
 -spec format_summary(float(), integer(), integer()) -> binary().
-format_summary(Coverage, Documented, Total) ->
+format_summary(Coverage, Complete, Total) ->
     iolist_to_binary(
         io_lib:format(
-            "Coverage: ~.1f% (~p/~p routes documented)",
-            [Coverage, Documented, Total]
+            "Coverage: ~.1f% (~p/~p routes complete)",
+            [Coverage, Complete, Total]
         )
     ).
 
--doc """
--------------------------------------------------------------------------------------------
-Formats complete coverage report as human-readable text.
--------------------------------------------------------------------------------------------
-""".
 -spec format_report(coverage_report()) -> binary().
 format_report(Report) ->
     AppName = maps:get(app_name, Report),
@@ -426,163 +252,88 @@ format_report(Report) ->
     Handlers = maps:get(handlers, Report),
     Coverage = maps:get(total_coverage, Report),
 
-    CoverageIcon =
-        if
-            Coverage >= 80.0 -> "[OK]";
-            Coverage >= 50.0 -> "[WARN]";
-            true -> "[FAIL]"
-        end,
+    Icon = if
+        Coverage >= 80.0 -> "[OK]";
+        Coverage >= 50.0 -> "[WARN]";
+        true -> "[FAIL]"
+    end,
 
-    Header = io_lib:format(
-        "~n================================================================~n",
-        []
-    ),
-    Title = io_lib:format(
-        "~s OpenAPI Coverage Report: ~p~n",
-        [CoverageIcon, AppName]
-    ),
-    Separator = io_lib:format(
-        "================================================================~n~n",
-        []
-    ),
-    SummaryLine = io_lib:format("[*] ~s~n~n", [Summary]),
+    Header = "\n================================================================\n",
+    Title = io_lib:format("~s OpenAPI Coverage Report: ~p\n", [Icon, AppName]),
+    Separator = "================================================================\n\n",
+    SummaryLine = io_lib:format("[*] ~s\n\n", [Summary]),
 
-    HandlerLines =
-        case Handlers of
-            [] ->
-                ["No handlers found with trails/0 export.~n"];
-            _ ->
-                lists:map(fun format_handler_coverage/1, Handlers)
-        end,
+    HandlerLines = case Handlers of
+        [] -> ["No handlers found.\n"];
+        _ -> lists:map(fun format_handler/1, Handlers)
+    end,
 
-    Footer = io_lib:format(
-        "~n================================================================~n",
-        []
-    ),
+    Footer = "\n================================================================\n",
 
     iolist_to_binary([Header, Title, Separator, SummaryLine, HandlerLines, Footer]).
 
--doc """
--------------------------------------------------------------------------------------------
-Formats a single handler's coverage information.
--------------------------------------------------------------------------------------------
-""".
--spec format_handler_coverage(handler_coverage()) -> iolist().
-format_handler_coverage(HandlerCov) ->
-    Module = maps:get(module, HandlerCov),
-    Coverage = maps:get(coverage_percent, HandlerCov),
-    _Documented = maps:get(documented_routes, HandlerCov),
-    Undocumented = maps:get(undocumented_routes, HandlerCov),
-    Incomplete = maps:get(incomplete_routes, HandlerCov),
-    Suggestions = maps:get(suggestions, HandlerCov, []),
+-spec format_handler(handler_coverage()) -> iolist().
+format_handler(HC) ->
+    Module = maps:get(module, HC),
+    Coverage = maps:get(coverage_percent, HC),
+    Complete = maps:get(complete_routes, HC),
+    Incomplete = maps:get(incomplete_routes, HC),
+    Undocumented = maps:get(undocumented_routes, HC),
 
-    Icon =
-        if
-            Coverage >= 80.0 -> "[OK]";
-            Coverage >= 50.0 -> "[WARN]";
-            true -> "[FAIL]"
-        end,
+    Icon = if
+        Coverage >= 80.0 -> "[OK]";
+        Coverage >= 50.0 -> "[WARN]";
+        true -> "[FAIL]"
+    end,
 
-    ModuleLine = io_lib:format(
-        "~s ~p (~.1f% documented)~n",
-        [Icon, Module, Coverage]
-    ),
+    ModuleLine = io_lib:format("~s ~p (~.1f% complete)\n", [Icon, Module, Coverage]),
 
-    case Undocumented == [] andalso Incomplete == [] of
-        true ->
-            [ModuleLine, "  [x] All routes documented~n~n"];
-        false ->
-            UndocLines = lists:map(
-                fun(Path) ->
-                    io_lib:format("  * Missing: ~s~n", [Path])
-                end,
-                Undocumented
-            ),
-
-            IncompleteLines = lists:map(
-                fun(IncompleteRoute) ->
-                    Path = maps:get(path, IncompleteRoute),
-                    Method = maps:get(method, IncompleteRoute),
-                    Issues = maps:get(issues, IncompleteRoute),
-                    IssueStr = lists:join(<<", ">>, Issues),
-                    io_lib:format(
-                        "  * Incomplete: ~s [~s] (~s)~n",
-                        [Path, Method, IssueStr]
-                    )
-                end,
-                Incomplete
-            ),
-
-            SuggestionLines =
-                case Suggestions of
-                    [] ->
-                        [];
-                    _ ->
-                        [
-                            "  [!] Suggestions:\n"
-                            | lists:map(
-                                fun(Suggestion) ->
-                                    io_lib:format("     - ~s~n", [Suggestion])
-                                end,
-                                % Show max 5 suggestions
-                                lists:sublist(Suggestions, 5)
-                            )
-                        ]
-                end,
-
-            [ModuleLine, UndocLines, IncompleteLines, SuggestionLines]
-    end.
-
--doc """
--------------------------------------------------------------------------------------------
-Formats suggestions as actionable markdown-style text.
-Useful for generating TODO lists or issue descriptions.
--------------------------------------------------------------------------------------------
-""".
--spec format_suggestions(coverage_report()) -> binary().
-format_suggestions(Report) ->
-    Handlers = maps:get(handlers, Report),
-
-    AllSuggestions = lists:flatmap(
-        fun(HandlerCov) ->
-            Module = maps:get(module, HandlerCov),
-            Suggestions = maps:get(suggestions, HandlerCov, []),
-
-            lists:map(
-                fun(Suggestion) ->
-                    iolist_to_binary([
-                        <<"- [ ] ">>,
-                        atom_to_binary(Module, utf8),
-                        <<": ">>,
-                        Suggestion
+    CompleteLines = case Complete of
+        [] -> [];
+        _ -> [io_lib:format("  ✓ Complete (~p routes):\n", [length(Complete)])
+              | lists:map(fun(R) ->
+                    io_lib:format("     ~s [~s]\n", [
+                        maps:get(path, R),
+                        maps:get(method, R)
                     ])
-                end,
-                Suggestions
-            )
-        end,
-        Handlers
-    ),
+                end, lists:sublist(Complete, 5))] ++
+              case length(Complete) > 5 of
+                  true -> [io_lib:format("     ... and ~p more\n", [length(Complete) - 5])];
+                  false -> []
+              end
+    end,
 
-    case AllSuggestions of
-        [] ->
-            <<"# OpenAPI Documentation TODO\n\n✅ All routes are documented and complete!\n">>;
-        _ ->
-            Header = <<"# OpenAPI Documentation TODO\n\n">>,
-            SuggestionList = iolist_to_binary(lists:join(<<"\n">>, AllSuggestions)),
-            <<Header/binary, SuggestionList/binary, "\n">>
-    end.
+    IncompleteLines = case Incomplete of
+        [] -> [];
+        _ -> [io_lib:format("  ⚠ Incomplete (~p routes):\n", [length(Incomplete)])
+              | lists:map(fun(R) ->
+                    Issues = maps:get(issues, R),
+                    IssuesStr = iolist_to_binary(lists:join(", ", Issues)),
+                    io_lib:format("     ~s [~s]: ~s\n", [
+                        maps:get(path, R),
+                        maps:get(method, R),
+                        IssuesStr
+                    ])
+                end, lists:sublist(Incomplete, 10))] ++
+              case length(Incomplete) > 10 of
+                  true -> [io_lib:format("     ... and ~p more\n", [length(Incomplete) - 10])];
+                  false -> []
+              end
+    end,
 
--doc """
--------------------------------------------------------------------------------------------
-Ensures a method value is converted to binary.
-Handles atoms, strings, binaries, and integers (for edge cases).
--------------------------------------------------------------------------------------------
-""".
--spec ensure_binary_method(term()) -> binary().
-ensure_binary_method(Method) when is_binary(Method) -> Method;
-ensure_binary_method(Method) when is_atom(Method) -> atom_to_binary(Method, utf8);
-ensure_binary_method(Method) when is_list(Method) -> list_to_binary(Method);
-ensure_binary_method(Method) when is_integer(Method) ->
-    % Edge case: if somehow Method is an integer, convert to binary
-    % This shouldn't happen but adding for defensive programming
-    list_to_binary(integer_to_list(Method)).
+    UndocumentedLines = case Undocumented of
+        [] -> [];
+        _ -> [io_lib:format("  ✗ Undocumented (~p routes):\n", [length(Undocumented)])
+              | lists:map(fun(R) ->
+                    io_lib:format("     ~s [~s]\n", [
+                        maps:get(path, R),
+                        maps:get(method, R)
+                    ])
+                end, lists:sublist(Undocumented, 5))] ++
+              case length(Undocumented) > 5 of
+                  true -> [io_lib:format("     ... and ~p more\n", [length(Undocumented) - 5])];
+                  false -> []
+              end
+    end,
+
+    [ModuleLine, CompleteLines, IncompleteLines, UndocumentedLines, "\n"].
