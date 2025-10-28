@@ -134,11 +134,15 @@ analyze_route_method(Path, Method, PathsMap) ->
             {undocumented, #{path => Path, method => Method}};
         MethodsMap ->
             io:format("[DEBUG] Found metadata for path, MethodsMap: ~p~n", [MethodsMap]),
-            MethodLower = list_to_binary(string:lowercase(binary_to_list(Method))),
-            io:format("[DEBUG] Looking for method: ~s~n", [MethodLower]),
-            case maps:get(MethodLower, MethodsMap, undefined) of
+            % Method might be binary or atom, convert to atom for lookup
+            % string:lowercase returns unicode:chardata(), convert to binary first
+            MethodBinary = ensure_binary(Method),
+            MethodLowerBin = unicode:characters_to_binary(string:lowercase(MethodBinary)),
+            MethodAtom = binary_to_existing_atom(MethodLowerBin, utf8),
+            io:format("[DEBUG] Looking for method atom: ~p~n", [MethodAtom]),
+            case maps:get(MethodAtom, MethodsMap, undefined) of
                 undefined ->
-                    io:format("[DEBUG] Method ~s not found in metadata~n", [MethodLower]),
+                    io:format("[DEBUG] Method ~p not found in metadata~n", [MethodAtom]),
                     % Path has metadata but not this method
                     {undocumented, #{path => Path, method => Method}};
                 OpSpec ->
