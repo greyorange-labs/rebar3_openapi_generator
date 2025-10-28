@@ -290,7 +290,7 @@ format_handler(HC) ->
 
     CompleteLines = case Complete of
         [] -> [];
-        _ -> [io_lib:format("  ✓ Complete (~p routes):\n", [length(Complete)])
+        _ -> [io_lib:format("  ✓ Complete (~w routes):\n", [length(Complete)])
               | lists:map(fun(R) ->
                     io_lib:format("     ~s [~s]\n", [
                         maps:get(path, R),
@@ -298,14 +298,14 @@ format_handler(HC) ->
                     ])
                 end, lists:sublist(Complete, 5))] ++
               case length(Complete) > 5 of
-                  true -> [io_lib:format("     ... and ~p more\n", [length(Complete) - 5])];
+                  true -> [io_lib:format("     ... and ~w more\n", [length(Complete) - 5])];
                   false -> []
               end
     end,
 
     IncompleteLines = case Incomplete of
         [] -> [];
-        _ -> [io_lib:format("  ⚠ Incomplete (~p routes):\n", [length(Incomplete)])
+        _ -> [io_lib:format("  ⚠ Incomplete (~w routes):\n", [length(Incomplete)])
               | lists:map(fun(R) ->
                     Issues = maps:get(issues, R),
                     IssuesStr = iolist_to_binary(lists:join(", ", Issues)),
@@ -316,14 +316,14 @@ format_handler(HC) ->
                     ])
                 end, lists:sublist(Incomplete, 10))] ++
               case length(Incomplete) > 10 of
-                  true -> [io_lib:format("     ... and ~p more\n", [length(Incomplete) - 10])];
+                  true -> [io_lib:format("     ... and ~w more\n", [length(Incomplete) - 10])];
                   false -> []
               end
     end,
 
     UndocumentedLines = case Undocumented of
         [] -> [];
-        _ -> [io_lib:format("  ✗ Undocumented (~p routes):\n", [length(Undocumented)])
+        _ -> [io_lib:format("  ✗ Undocumented (~w routes):\n", [length(Undocumented)])
               | lists:map(fun(R) ->
                     io_lib:format("     ~s [~s]\n", [
                         maps:get(path, R),
@@ -331,7 +331,7 @@ format_handler(HC) ->
                     ])
                 end, lists:sublist(Undocumented, 5))] ++
               case length(Undocumented) > 5 of
-                  true -> [io_lib:format("     ... and ~p more\n", [length(Undocumented) - 5])];
+                  true -> [io_lib:format("     ... and ~w more\n", [length(Undocumented) - 5])];
                   false -> []
               end
     end,
