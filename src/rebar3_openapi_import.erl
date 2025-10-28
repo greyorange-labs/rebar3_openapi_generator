@@ -521,21 +521,43 @@ add_trails_to_module(ExistingContent, PathsToAdd, MetadataModule, HandlerName) -
         PathsToAdd
     ),
 
-    % Find the last ]. in trails/0 function and insert before it
-    case re:run(ContentStr, "trails\\(\\)\\s*->\\s*\\[(.*?)\\]\\.", [dotall, {capture, all, list}]) of
-        {match, [_FullMatch]} ->
-            % Insert new trails before the closing ].
-            NewTrailsStr = string:join(NewTrails, ",\n"),
-            UpdatedContent = re:replace(ContentStr,
-                                       "(trails\\(\\)\\s*->\\s*\\[.*?)(\\]\\.)$",
-                                       io_lib:format("\\1,\\n~s\\2", [NewTrailsStr]),
-                                       [{return, list}, dotall, multiline]),
+    % First, try to find trails/0 function and insert TODO at the beginning
+    case re:run(ContentStr, "^(trails\\(\\)\\s*->)", [multiline, {capture, all, index}]) of
+        {match, [{Start, Len}]} ->
+            % Found trails() function, add TODO comment right after the function declaration
+            NewTrailsStr = string:join(NewTrails, "\n%%         "),
+            
+            % Get paths for the TODO message
+            PathsList = lists:map(
+                fun(PathData) ->
+                    Path = maps:get(path, PathData),
+                    CowboyPath = normalize_path_for_cowboy(binary_to_list(Path)),
+                    io_lib:format("  - ~s", [CowboyPath])
+                end,
+                PathsToAdd
+            ),
+            PathsListStr = string:join(PathsList, "\n%%     "),
+            
+            TodoComment = io_lib:format(
+                "\n    %% TODO: Add/modify trails for the following route(s):\n"
+                "%%     ~s\n"
+                "%% \n"
+                "%% Use the following trail definitions:\n"
+                "%%         ~s\n",
+                [PathsListStr, NewTrailsStr]
+            ),
+            
+            % Insert TODO right after "trails() ->"
+            {Before, After} = lists:split(Start + Len, ContentStr),
+            UpdatedContent = Before ++ TodoComment ++ After,
             list_to_binary(UpdatedContent);
         nomatch ->
-            % Couldn't parse, append comment with trails to add manually
+            % Couldn't find trails/0 function, append comment at end as fallback
             Comment = io_lib:format(
-                "\n\n%% New trails to add to trails/0 function:\n%% ~s\n",
-                [string:join(NewTrails, ",\n%% ")]
+                "\n\n%% TODO: Add trails/0 function or modify existing routing\n"
+                "%% New trails to add:\n"
+                "%%         ~s\n",
+                [string:join(NewTrails, ",\n%%         ")]
             ),
             <<ExistingContent/binary, (list_to_binary(Comment))/binary>>
     end.
