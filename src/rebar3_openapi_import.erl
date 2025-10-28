@@ -634,7 +634,7 @@ insert_new_trails(Body, ToAdd, _HandlerName, _MetadataModule) ->
 
     % Try to find where to insert (before closing bracket or after last trail)
     case re:run(Body, "(\\])\\.\\s*$", [multiline, {capture, all, index}]) of
-        {match, [{BracketPos, _}]} ->
+        {match, [_FullMatch, {BracketPos, _}]} ->
             % Insert before closing bracket
             Before = string:substr(Body, 1, BracketPos - 1),
             After = string:substr(Body, BracketPos),
@@ -644,7 +644,7 @@ insert_new_trails(Body, ToAdd, _HandlerName, _MetadataModule) ->
                 "" -> Before ++ "\n" ++ NewTrailsStr ++ "\n    " ++ After;
                 _ -> Before ++ ",\n" ++ NewTrailsStr ++ "\n    " ++ After
             end;
-        nomatch ->
+        _ ->
             % Couldn't parse, append with comment
             Body ++ "\n    %% TODO: Add these trails:\n    %% " ++
                 string:join(NewTrailsList, "\n    %% ")
